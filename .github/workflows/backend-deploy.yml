@@ -1,0 +1,86 @@
+name: Deploy Backend
+
+# Mirrors bm-ts/backend's deploy.yaml pattern (build -> push to registry ->
+# trigger Coolify webhook), adapted for this repo living on GitHub instead of
+# Gitea. main = CI only; deploys only happen from `develop` so a routine
+# merge to main never silently ships to production.
+#
+# Required GitHub Actions secrets (Settings -> Secrets and variables ->
+# Actions, on this repo) — someone with repo admin access adds these, not
+# Claude:
+#   REGISTRY_USER        — Gitea container registry username
+#   REGISTRY_PASSWORD     — Gitea container registry password/token
+#   COOLIFY_WEBHOOK_URL   — Coolify's deploy-trigger webhook for this service
+#
+# This workflow does not run until those three secrets exist on the repo —
+# until then it will fail at the "Login to registry" step, loudly, which is
+# the point: no silent partial deploy.
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install pip-audit
+          .venv/bin/python -m pip install -e ".[test]"
+
+      - name: Audit dependencies for vulnerabilities
+        working-directory: backend
+        run: |
+          .venv/bin/python -m pip_audit --skip-editable
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          .venv/bin/python -m pytest --tb=short -q
+
+      - name: Login to registry
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login gitea.birthdaymessaging.com -u "${{ secrets.REGISTRY_USER }}" --password-stdin
+
+      - name: Build + Push image
+        working-directory: backend
+        run: |
+          IMAGE_NAME=gitea.birthdaymessaging.com/ctmmediagroup/bm-mobile-backend
+
+          SAFE_BRANCH_NAME=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          VERSION="${SAFE_BRANCH_NAME}-$(git rev-parse --short HEAD)"
+
+          echo "building $IMAGE_NAME:$VERSION"
+
+          docker build \
+            -t $IMAGE_NAME:$VERSION \
+            -t $IMAGE_NAME:latest \
+            .
+
+          echo "pushing to registry..."
+
+          docker push $IMAGE_NAME:$VERSION
+          docker push $IMAGE_NAME:latest
+
+      - name: Trigger Coolify deploy
+        run: |
+          echo "triggering coolify..."
+          curl -X GET "${{ secrets.COOLIFY_WEBHOOK_URL }}" -v
+
+      - name: Logout
+        if: always()
+        run: docker logout gitea.birthdaymessaging.com

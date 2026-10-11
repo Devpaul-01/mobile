@@ -1,0 +1,94 @@
+name: Backend CI
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "backend/**"
+  pull_request:
+    paths:
+      - "backend/**"
+
+jobs:
+  lint-and-test:
+    name: Ruff · Mypy · Pytest
+    runs-on: ubuntu-latest
+
+    env:
+      JWT_SECRET_KEY: ci-test-only-secret-not-for-production-minimum32chars
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[test,lint]"
+          pip install ruff
+
+      - name: Ruff lint
+        run: ruff check app/
+
+      - name: Mypy type check
+        run: mypy app/
+
+      - name: Run tests
+        run: python -m pytest --tb=short -q
+
+  alembic-migrations:
+    name: Alembic migrations (upgrade + downgrade)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: bm_mobile_migrations_test
+          POSTGRES_PASSWORD: cipass
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bm_mobile_migrations_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:cipass@localhost:5432/bm_mobile_migrations_test
+      JWT_SECRET_KEY: ci-test-only-secret-not-for-production-minimum32chars
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: pip install -e ".[db]"
+
+      - name: Alembic upgrade head
+        run: alembic upgrade head
+
+      - name: Alembic downgrade base
+        run: alembic downgrade base
