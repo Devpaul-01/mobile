@@ -24,6 +24,7 @@ from sqlalchemy import select
 
 from app.core.errors import AppError, ErrorCodes
 from app.core.jwt import JWTError, TokenType, decode_token, ensure_token_type
+from app.core.redis_client import cache_session_valid, is_session_cached_valid
 from app.db.models import User, UserSession
 from app.db.session import get_db
 
@@ -73,6 +74,14 @@ async def get_current_token_payload(
     except ValueError as exc:
         raise _raise_credentials_error() from exc
 
+    # Redis-backed fast path (adopted this phase, see core/redis_client.py):
+    # a cache hit means Postgres already confirmed this exact session was
+    # valid within the last 60s, so we can skip the DB round trip. A miss —
+    # including "Redis isn't configured/reachable" — always falls through
+    # to the real check below; nothing is ever trusted on a cache miss.
+    if await is_session_cached_valid(str(session_uuid)):
+        return payload
+
     result = await db.execute(
         select(UserSession).where(
             UserSession.id == session_uuid, UserSession.user_id == user_id
@@ -85,6 +94,7 @@ async def get_current_token_payload(
     if _as_utc(session.expires_at) <= datetime.now(timezone.utc):
         raise _raise_credentials_error()
 
+    await cache_session_valid(str(session_uuid))
     return payload
 
 

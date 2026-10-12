@@ -15,6 +15,21 @@ jobs:
     name: Ruff · Mypy · Pytest
     runs-on: ubuntu-latest
 
+    # Redis, adopted this phase (not deferred to Phase 10 — see
+    # docs/development/implementation-status.md). test_redis.py exercises
+    # both "Redis is up" and "Redis is unreachable" behavior — the latter
+    # points at a port nothing listens on, the former needs this service.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       JWT_SECRET_KEY: ci-test-only-secret-not-for-production-minimum32chars
 

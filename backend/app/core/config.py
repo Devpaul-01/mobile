@@ -7,9 +7,17 @@ silently-insecure state. New secrets, new codebase — nothing here is shared wi
 extension's backend (see MOBILE_APP_ARCHITECTURE_SPEC.md §12.5, §31).
 
 Milestone 1 (auth-only) only requires DATABASE_URL and the JWT_* settings below.
-Redis/S3/PayPal/SendGrid settings are added in later phases (§29, §26, §23, §19) —
-left out entirely for now rather than stubbed, so an incomplete .env fails loudly at
-the point a feature actually needs the missing setting, not silently at startup.
+S3/PayPal/SendGrid settings are added in later phases (§26, §23, §19) — left out
+entirely for now rather than stubbed, so an incomplete .env fails loudly at the
+point a feature actually needs the missing setting, not silently at startup.
+
+REDIS_URL is an exception to that rule: per an explicit team decision (2026-10-11,
+see docs/development/implementation-status.md), Redis is adopted in this phase
+rather than deferred to Phase 10. It's optional here on purpose — ``redis_url``
+defaults to ``None``, and every Redis-backed feature (rate limiting, session
+validity caching) falls back to in-process behavior when it's unset or
+unreachable, rather than failing the whole app's startup on a missing/down
+Redis. See app/core/redis_client.py and app/core/rate_limiter.py.
 """
 
 from __future__ import annotations
@@ -42,6 +50,8 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(
         default=30, alias="REFRESH_TOKEN_EXPIRE_DAYS"
     )
+
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:8081"]

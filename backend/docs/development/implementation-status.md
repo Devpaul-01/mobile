@@ -101,3 +101,94 @@ Nothing involving contacts, reminders, approvals, or push notifications.
 3. Decide whether to pull SendGrid integration forward before Milestone 2
    or keep deferring it — affects whether real users can actually complete
    registration during any beta testing that happens before Phase 8.
+
+## Redis adoption — 2026-10-11/12 (branch `feat/redis-infra`, off `feat/backend-foundation`)
+
+Note: this branch was cut from `feat/backend-foundation` directly (not from
+`feat/contacts-import-dedup`), since none of this touches contacts code —
+keeping it a separate logical unit/PR per the standing git-discipline
+instruction. Milestone 2's own status entry lives on its own branch and
+will show up here once that branch merges.
+
+### Why now, not Phase 10
+Per an explicit team decision, Redis is adopted in this phase rather than
+deferred to Phase 10 as `MOBILE_APP_ARCHITECTURE_SPEC.md` §25/§29/§41
+originally scoped it. Decision, as given: use Redis now; fall back to
+in-memory behavior when Redis is down, for both rate limiting and session
+caching.
+
+### Completed
+- **Rate limiting** (`core/rate_limiter.py`): now Redis-backed when
+  `REDIS_URL` is set, using SlowAPI/`limits`' own built-in
+  `in_memory_fallback_enabled=True` — no custom fallback code needed. If
+  Redis is unreachable, the limiter detects the dead storage, switches to
+  an in-process counter automatically, and retries the real storage later
+  (self-healing). If `REDIS_URL` isn't set at all (local dev, test suite),
+  it's pure in-memory, same as Milestone 1.
+- **Session-validity caching** (new `core/redis_client.py`, wired into
+  `api/deps.py get_current_token_payload` and
+  `api/routers/auth.py _revoke_session_record`): a short-TTL (60s) positive
+  cache on top of the real Postgres `UserSession` check, not a replacement
+  for it. **This is a deliberate, flagged departure from
+  MOBILE_APP_ARCHITECTURE_SPEC.md §25**, which says session/token validity
+  should never be cached, for durability/auditability of revocation. The
+  trade-off accepted here, per the team's explicit instruction to use Redis
+  for this now: a session revoked at the exact moment its cache entry was
+  just written could still read as valid for up to 60 seconds if the
+  explicit cache-invalidation call (which runs on every revocation path —
+  logout, password-reset-revokes-all) itself fails. Every cache read is
+  still a **positive-only** cache — a miss, or Redis being down, always
+  falls through to the real Postgres check; nothing is ever trusted *only*
+  because Redis said so.
+- Every Redis call in both modules is wrapped so a Redis failure degrades
+  to "behave as if Redis doesn't exist" — never a 500, never a security
+  downgrade (a down Redis can only make things slower, by forcing more
+  Postgres round trips / falling back to in-process rate limiting, never
+  less correct).
+- `redis` (the Python client) added to `pyproject.toml`. CI
+  (`.github/workflows/backend-ci.yml`) now brings up a `redis:7-alpine`
+  service container for the lint-and-test job, since `test_redis.py`
+  exercises real Redis behavior, not just the unreachable-Redis fallback
+  path.
+- 6 new tests (`app/tests/test_redis.py`): session-cache round trip against
+  real Redis, cross-session-id isolation, never-raises-when-unreachable (x2
+  variants: not configured at all, configured but unreachable), and two
+  rate-limiter tests (enforces against real Redis; falls back to in-memory
+  and keeps enforcing when Redis is unreachable) built against a small
+  standalone FastAPI app configured the same way `core/rate_limiter.py`
+  configures the real one — the app-wide limiter is a singleton built once
+  at import time from whatever `REDIS_URL` was in the process environment,
+  so it can't be reconfigured per-test.
+- `docker-compose.yml` and `.env.example` already had a `redis`
+  service/`REDIS_URL` stubbed in from the original scaffold cleanup
+  (Session 1) — nothing to add there, they just start being used now.
+
+### Not done in this phase (intentionally — see §25's other Redis uses)
+- Dashboard aggregate caching (`cache:dashboard:{user_id}`) — there's no
+  dashboard endpoint yet (nothing to cache).
+- PayPal pending-order mapping (`paypal:pending:{order_id}`) — no payments
+  code exists yet.
+Both are still Redis uses the architecture doc scoped to later phases; only
+the two the team explicitly asked for now (rate limiting, session caching)
+were pulled forward.
+
+### Tests
+- `pytest`: 25 passed (19 from Milestone 1 + 6 new), 0 failed — run with a
+  real local Redis on port 6399 for the "Redis is up" cases.
+- `ruff check app/`: clean
+- `mypy app/`: clean
+
+### Branches / commits
+- Branch: `feat/redis-infra` (off `feat/backend-foundation`, not off the
+  contacts branch — no dependency between them)
+
+### Recommended next steps
+1. Merge whenever ready — same standing rule, not merged to `main` without
+   explicit permission.
+2. Milestone 3 (separate branch, off `feat/contacts-import-dedup` since it
+   needs the `Contact` model): reminders, scoped specifically to "apply a
+   reminder to several selected contacts at once" per the team's
+   explicit scope answer (multi-select contacts at creation time, no
+   persisted Group entity) — not the full scheduler/push/email/approval
+   machinery from architecture doc Phases 6–9, which is a separate,
+   larger undertaking.
