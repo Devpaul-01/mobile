@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:8081"]
     )
+
+    # Reminder scheduler (Phase 6, §16.2) — an APScheduler job inside the
+    # running app process, not a separate worker (see services/scheduler.py
+    # module docstring for the architecture rationale). Defaults on for a
+    # real run; the test suite explicitly turns it off (see
+    # app/tests/conftest.py) so pytest doesn't start a 15-minute background
+    # job against the per-test SQLite engine.
+    scheduler_enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
+
     log_level: str = Field(default="INFO")
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
     sentry_environment: str = Field(default="development", alias="SENTRY_ENVIRONMENT")

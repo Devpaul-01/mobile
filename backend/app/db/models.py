@@ -3,14 +3,18 @@ db/models.py — SQLAlchemy ORM models.
 
 Milestone 1 added users, sessions, and the auth-token tables. Milestone 2
 added Contact/ContactIdentifier per MOBILE_APP_ARCHITECTURE_SPEC.md §36.
-Milestone 3 (this revision) adds Reminder — scoped specifically to "apply a
-reminder to several selected contacts at once" per an explicit team scope
-answer (multi-select contacts at creation time, no persisted Group entity),
-not the full scheduler/occurrence/push/email/approval machinery the
-architecture doc's Phases 6-9 describe (ReminderOccurrence, PendingApproval,
-ApprovalHistory, PushToken are still deferred). Subscriptions/payments are
-still deferred to later milestones too — not stubbed here, since an empty
-table nobody writes to yet is dead weight, not scaffolding.
+Milestone 3 added Reminder — scoped specifically to "apply a reminder to
+several selected contacts at once" per an explicit team scope answer
+(multi-select contacts at creation time, no persisted Group entity), not
+the full scheduler/occurrence/push/email/approval machinery.
+Milestone 4 (this revision) adds ReminderOccurrence (the scheduler's
+idempotency anchor, §16.1) and PushToken (device push-token registration,
+§12.2) — i.e. Phase 6 plus a minimal Phase 7 slice. PendingApproval /
+ApprovalHistory (the WhatsApp state machine, Phase 9) are still deferred —
+a large, separate state machine of their own, not bundled in here.
+Subscriptions/payments are still deferred to later milestones too — not
+stubbed here, since an empty table nobody writes to yet is dead weight, not
+scaffolding.
 
 Patterns copied from bm-ts/backend/app/db/models.py: UUID primary keys,
 ``server_default=now()`` timestamps, ``ondelete="CASCADE"`` FKs so account
@@ -31,7 +35,19 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -422,4 +438,108 @@ class Reminder(Base):
     __table_args__ = (
         Index("idx_reminders_user_id", "user_id"),
         Index("idx_reminders_contact_id", "contact_id"),
+    )
+
+
+class EmailStatus(str, enum.Enum):
+    """Tracks the (stubbed, see services/email.py) email-send attempt for
+    one ReminderOccurrence. ``None``/absent on the row itself means "email
+    wasn't a requested channel for this reminder" — not a 5th enum value,
+    since that's a different thing from "we tried and it's pending"."""
+
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    FAILED_PERMANENT = "failed_permanent"
+
+
+class ReminderOccurrence(Base):
+    """One row per actual calendar-year firing of a ``Reminder`` — the
+    scheduler's idempotency anchor (MOBILE_APP_ARCHITECTURE_SPEC.md §16.1).
+
+    Why a separate table rather than mutating ``Reminder`` in place: the
+    scheduler runs every 15 minutes (§16.2); without a durable "did we
+    already fire for 2026" record, a scheduler restart mid-cycle could
+    double-fire. The unique constraint on ``(reminder_id, occurrence_year)``
+    makes "create occurrence" naturally idempotent — a constraint violation
+    means "already handled, skip," not an error (see
+    services/scheduler.py).
+    """
+
+    __tablename__ = "reminder_occurrences"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    reminder_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("reminders.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    occurrence_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    fired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    email_status: Mapped[EmailStatus | None] = mapped_column(
+        Enum(EmailStatus, name="email_status", native_enum=False, length=20),
+        nullable=True,
+    )
+    email_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    email_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    reminder: Mapped["Reminder"] = relationship("Reminder")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "reminder_id", "occurrence_year", name="uq_reminder_occurrence_year"
+        ),
+        Index("idx_reminder_occurrences_reminder_id", "reminder_id"),
+    )
+
+
+class PushPlatform(str, enum.Enum):
+    IOS = "ios"
+    ANDROID = "android"
+
+
+class PushToken(Base):
+    """A device's push-notification token, registered by the mobile client
+    (MOBILE_APP_ARCHITECTURE_SPEC.md §12.2 — upsert on ``(user_id,
+    device_token)``, safe to call on every app foreground).
+
+    Sending is stubbed for now (services/push.py logs instead of calling
+    Expo's push API — no mobile client exists yet to actually receive one).
+    Push failures are never retried (§16.3 — "push is inherently
+    best-effort/fire-and-forget"), which is why, unlike
+    ``ReminderOccurrence.email_status``, there's no status/attempts tracking
+    here at all.
+    """
+
+    __tablename__ = "push_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    device_token: Mapped[str] = mapped_column(String(255), nullable=False)
+    platform: Mapped[PushPlatform] = mapped_column(
+        Enum(PushPlatform, name="push_platform", native_enum=False, length=10),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_token", name="uq_push_token_user_device"),
+        Index("idx_push_tokens_user_id", "user_id"),
     )
