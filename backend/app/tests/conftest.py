@@ -32,6 +32,7 @@ from app.db.models import (
     ContactIdentifier,
     EmailVerificationToken,
     PasswordResetToken,
+    Reminder,
     RevokedToken,
     User,
     UserSession,
@@ -96,6 +97,19 @@ def _set_contact_identifier_defaults(mapper, connection, target):
         target.created_at = datetime.now(timezone.utc)
     if getattr(target, "normalization_failed", None) is None:
         target.normalization_failed = False
+
+
+@sa_event.listens_for(Reminder, "before_insert")
+def _set_reminder_defaults(mapper, connection, target):
+    now = datetime.now(timezone.utc)
+    if getattr(target, "created_at", None) is None:
+        target.created_at = now
+    if getattr(target, "updated_at", None) is None:
+        target.updated_at = now
+    if getattr(target, "enabled", None) is None:
+        target.enabled = True
+    if getattr(target, "lead_time_days", None) is None:
+        target.lead_time_days = 0
 
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

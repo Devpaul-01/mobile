@@ -881,6 +881,374 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Internal Server Error
+  /mobile/reminders:
+    post:
+      tags:
+      - mobile-reminders
+      summary: Create Reminder
+      operationId: create_reminder_mobile_reminders_post
+      security:
+      - OAuth2PasswordBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderCreate'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    get:
+      tags:
+      - mobile-reminders
+      summary: List Reminders
+      operationId: list_reminders_mobile_reminders_get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Contact Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+  /mobile/reminders/bulk:
+    post:
+      tags:
+      - mobile-reminders
+      summary: Bulk Create Reminders Endpoint
+      operationId: bulk_create_reminders_endpoint_mobile_reminders_bulk_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderBulkCreate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderBulkCreateResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/reminders/{reminder_id}:
+    get:
+      tags:
+      - mobile-reminders
+      summary: Get Reminder
+      operationId: get_reminder_mobile_reminders__reminder_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: reminder_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Reminder Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    patch:
+      tags:
+      - mobile-reminders
+      summary: Update Reminder
+      operationId: update_reminder_mobile_reminders__reminder_id__patch
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: reminder_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Reminder Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReminderUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReminderOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    delete:
+      tags:
+      - mobile-reminders
+      summary: Delete Reminder
+      operationId: delete_reminder_mobile_reminders__reminder_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: reminder_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Reminder Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
   /health:
     get:
       summary: Service health
@@ -1242,6 +1610,161 @@ components:
       title: RegisterRequest
       description: "Registration payload \u2014 email is validated as a proper address;\
         \ password minimum 8 chars."
+    ReminderBulkCreate:
+      properties:
+        contact_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          maxItems: 500
+          minItems: 1
+          title: Contact Ids
+        lead_time_days:
+          type: integer
+          maximum: 365.0
+          minimum: 0.0
+          title: Lead Time Days
+          default: 0
+        channels:
+          items:
+            type: string
+            maxLength: 20
+          type: array
+          title: Channels
+      type: object
+      required:
+      - contact_ids
+      title: ReminderBulkCreate
+      description: "Apply one reminder definition to several selected contacts at\
+        \ once \u2014\nthe explicit feature request this milestone exists for. No\
+        \ persisted\nGroup entity: ``contact_ids`` is a plain multi-select, scoped\
+        \ to this\none call."
+    ReminderBulkCreateResponse:
+      properties:
+        created:
+          items:
+            $ref: '#/components/schemas/ReminderOut'
+          type: array
+          title: Created
+        skipped_contact_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Skipped Contact Ids
+      type: object
+      required:
+      - created
+      title: ReminderBulkCreateResponse
+    ReminderCreate:
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+        lead_time_days:
+          type: integer
+          maximum: 365.0
+          minimum: 0.0
+          title: Lead Time Days
+          default: 0
+        channels:
+          items:
+            type: string
+            maxLength: 20
+          type: array
+          title: Channels
+      type: object
+      required:
+      - contact_id
+      title: ReminderCreate
+    ReminderListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ReminderOut'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: ReminderListResponse
+    ReminderOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+        lead_time_days:
+          type: integer
+          title: Lead Time Days
+        channels:
+          items:
+            type: string
+          type: array
+          title: Channels
+        enabled:
+          type: boolean
+          title: Enabled
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - contact_id
+      - lead_time_days
+      - channels
+      - enabled
+      - created_at
+      - updated_at
+      title: ReminderOut
+    ReminderUpdate:
+      properties:
+        lead_time_days:
+          anyOf:
+          - type: integer
+            maximum: 365.0
+            minimum: 0.0
+          - type: 'null'
+          title: Lead Time Days
+        channels:
+          anyOf:
+          - items:
+              type: string
+              maxLength: 20
+            type: array
+          - type: 'null'
+          title: Channels
+        enabled:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Enabled
+      type: object
+      title: ReminderUpdate
     RequestEmailVerificationRequest:
       properties:
         email:
@@ -1352,3 +1875,5 @@ tags:
   description: Authentication, registration, email verification, and password reset
 - name: mobile-contacts
   description: Contact import (with dedup), listing, and management
+- name: mobile-reminders
+  description: Reminder CRUD and multi-select bulk-apply to several contacts at once

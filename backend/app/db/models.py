@@ -2,10 +2,15 @@
 db/models.py — SQLAlchemy ORM models.
 
 Milestone 1 added users, sessions, and the auth-token tables. Milestone 2
-(this file) adds Contact/ContactIdentifier per MOBILE_APP_ARCHITECTURE_SPEC.md
-§36. Reminders, approvals, push tokens, subscriptions and payments are still
-deferred to later milestones — not stubbed here, since an empty table nobody
-writes to yet is dead weight, not scaffolding.
+added Contact/ContactIdentifier per MOBILE_APP_ARCHITECTURE_SPEC.md §36.
+Milestone 3 (this revision) adds Reminder — scoped specifically to "apply a
+reminder to several selected contacts at once" per an explicit team scope
+answer (multi-select contacts at creation time, no persisted Group entity),
+not the full scheduler/occurrence/push/email/approval machinery the
+architecture doc's Phases 6-9 describe (ReminderOccurrence, PendingApproval,
+ApprovalHistory, PushToken are still deferred). Subscriptions/payments are
+still deferred to later milestones too — not stubbed here, since an empty
+table nobody writes to yet is dead weight, not scaffolding.
 
 Patterns copied from bm-ts/backend/app/db/models.py: UUID primary keys,
 ``server_default=now()`` timestamps, ``ondelete="CASCADE"`` FKs so account
@@ -26,7 +31,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -342,4 +347,79 @@ class ContactIdentifier(Base):
         ),
         Index("idx_contact_identifier_normalized_value", "normalized_value"),
         Index("idx_contact_identifier_device_contact_id", "device_contact_id"),
+    )
+
+
+class ReminderChannel(str, enum.Enum):
+    """Delivery channels a reminder can request. Stored as a JSON list on
+    ``Reminder.channels`` rather than the architecture doc's suggested
+    array/bitmask column (§36) — a JSON list of these string values is
+    portable across Postgres and the SQLite test database, needs no
+    bit-arithmetic to read, and is small enough (3 possible values) that
+    bitmask compactness buys nothing here.
+
+    Only ``push`` has anything that could act on it yet (no scheduler, no
+    email service, no WhatsApp/approval flow exist in this codebase as of
+    Milestone 3) — all three are accepted and stored now so the reminder
+    *preference* survives once those phases are built, per the architecture
+    doc's Phase 6-9 order.
+    """
+
+    PUSH = "push"
+    EMAIL = "email"
+    WHATSAPP = "whatsapp"
+
+
+class Reminder(Base):
+    """A user's request to be reminded about a contact.
+
+    Milestone 3 scope, precisely: this table and its CRUD/bulk-create
+    endpoints only. No ``ReminderOccurrence`` (the scheduler's idempotency
+    anchor, MOBILE_APP_ARCHITECTURE_SPEC.md §16.1) and no scheduler exist
+    yet — a ``Reminder`` row here is a stored preference, not yet something
+    that fires. That's intentionally a separate, larger milestone (§41
+    Phase 6), not bundled into this one.
+
+    One contact can have more than one ``Reminder`` row (e.g. a "3 days
+    before" push reminder and a separate "on the day" email reminder) — the
+    schema doesn't force exactly one per contact, matching the doc's §36
+    one-to-many ``CONTACT ||--o{ REMINDER`` relationship rather than adding
+    a uniqueness constraint the doc never specifies.
+
+    ``user_id`` is denormalized here (also reachable via
+    ``contact.user_id``) per the doc's explicit call-out in §36 — "for
+    query convenience" — so listing a user's reminders never needs a join
+    through ``contacts``.
+    """
+
+    __tablename__ = "reminders"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    channels: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean(), nullable=False, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    contact: Mapped["Contact"] = relationship("Contact")
+
+    __table_args__ = (
+        Index("idx_reminders_user_id", "user_id"),
+        Index("idx_reminders_contact_id", "contact_id"),
     )
