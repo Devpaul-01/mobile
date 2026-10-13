@@ -7,9 +7,11 @@ silently-insecure state. New secrets, new codebase — nothing here is shared wi
 extension's backend (see MOBILE_APP_ARCHITECTURE_SPEC.md §12.5, §31).
 
 Milestone 1 (auth-only) only requires DATABASE_URL and the JWT_* settings below.
-Redis/S3/PayPal/SendGrid settings are added in later phases (§29, §26, §23, §19) —
-left out entirely for now rather than stubbed, so an incomplete .env fails loudly at
+Redis/PayPal/SendGrid settings are added in later phases (§29, §23, §19) — left
+out entirely for now rather than stubbed, so an incomplete .env fails loudly at
 the point a feature actually needs the missing setting, not silently at startup.
+Object storage (STORAGE_*, §26) is added in this revision — see the field
+comments below for why Cloudflare R2 rather than AWS S3.
 """
 
 from __future__ import annotations
@@ -54,6 +56,22 @@ class Settings(BaseSettings):
     # app/tests/conftest.py) so pytest doesn't start a 15-minute background
     # job against the per-test SQLite engine.
     scheduler_enabled: bool = Field(default=True, alias="SCHEDULER_ENABLED")
+
+    # Object storage (§26) — Cloudflare R2, per an explicit team decision
+    # (not AWS S3, despite the architecture doc's generic "S3-compatible
+    # storage" framing). R2's API is S3-compatible, so the client code
+    # (app/services/storage.py) is a plain boto3 S3 client pointed at a
+    # custom endpoint_url — nothing AWS-specific, R2 chosen only via
+    # configuration. All four fields are optional so the rest of the app
+    # still boots without them (e.g. in CI); app/services/storage.py
+    # raises a clear, loud error only when an upload/photo endpoint is
+    # actually called without them configured.
+    storage_endpoint_url: str | None = Field(default=None, alias="STORAGE_ENDPOINT_URL")
+    storage_bucket_name: str | None = Field(default=None, alias="STORAGE_BUCKET_NAME")
+    storage_access_key_id: str | None = Field(default=None, alias="STORAGE_ACCESS_KEY_ID")
+    storage_secret_access_key: str | None = Field(
+        default=None, alias="STORAGE_SECRET_ACCESS_KEY"
+    )
 
     log_level: str = Field(default="INFO")
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")

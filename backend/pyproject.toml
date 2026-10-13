@@ -18,6 +18,11 @@ dependencies = [
     "pydantic-settings>=2.14.2",
     "slowapi>=0.1.8",
     "apscheduler>=3.10",
+    # S3-compatible client — used against Cloudflare R2 per an explicit
+    # team decision (not AWS), see app/core/config.py and
+    # app/services/storage.py. boto3 works against any S3-compatible
+    # endpoint via a custom endpoint_url, so nothing here is AWS-specific.
+    "boto3>=1.40",
     "alembic>=1.13",
     "mako>=1.3.12",
     "sentry-sdk[fastapi]>=1.40",

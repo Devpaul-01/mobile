@@ -514,3 +514,104 @@ WhatsApp") and actual message delivery (unobservable, never claimed).
    PayPal payments (§23/§24), S3 object storage (§26, noting the team's
    earlier Cloudflare-instead-of-AWS decision), GDPR export/account
    deletion (§27).
+
+## Session 6 — 2026-10-13 (branch `feat/object-storage`, off `feat/whatsapp-approvals`)
+
+### What shipped
+- **Contact photo upload is built** — architecture doc §26, Phase 11.
+  One optional photo per contact (enforced via a unique constraint on
+  `contact_id`, matching §26's explicit MVP scope cut — no photo
+  library).
+- **Storage provider: Cloudflare R2, not AWS S3** — an explicit team
+  decision (confirmed again this session, having been raised earlier
+  alongside the Redis-now decision). R2's API is S3-compatible, so
+  `app/services/storage.py` is a plain `boto3` S3 client pointed at R2's
+  `endpoint_url` — nothing AWS-specific anywhere in the code; swapping
+  providers later is a config change, not a rewrite.
+- **Deliberate implementation choice, flagged because it reads differently
+  from the architecture doc's diagram**: uploads use a **presigned POST**
+  (`url` + `fields`, multipart form), not the doc's pictured bare
+  presigned PUT. Reasoning: §26.3 requires the 5MB limit to be enforced
+  "via the presigned URL's policy conditions (S3-native enforcement)" —
+  a bare PUT URL carries no such policy; only a presigned POST's
+  `Conditions` (`content-length-range`, exact `Content-Type` match) let
+  R2 itself enforce this before the object is ever written. This is a
+  closer reading of §26.3's actual requirement than the diagram's casual
+  phrasing, not a deviation from the requirement itself.
+- **New table**: `ContactPhoto` (`object_key` unique, `content_type`,
+  `size_bytes`, `uploaded_at`), unique on `contact_id`.
+- **Never trusts the client at confirm time** (§32's "never trust the
+  client" framing, applied here exactly as to PayPal elsewhere in the
+  doc): `/confirm` does a real `HEAD` request against R2 to verify the
+  object exists and re-checks its actual content-type/size — an
+  oversized object is rejected *and deleted* from storage, not just
+  rejected at the metadata layer.
+- **Endpoints** (`app/api/routers/uploads.py`, `/mobile/uploads`):
+  `POST /presign`, `POST /confirm` (replaces any existing photo for that
+  contact, deleting the old object — "one photo per contact" made
+  concrete), `GET /contact-photo/{contact_id}`, `DELETE
+  /contact-photo/{contact_id}`. The last two aren't in the architecture
+  doc's literal §35 inventory — added because §26.3 requires photos be
+  readable only via short-lived presigned GET URLs issued on demand
+  (needs a GET endpoint to issue them) and a photo with no delete path
+  would be a one-way door.
+- **Deliberately not fail-open**: unlike Redis, there's no sensible
+  degraded mode for object storage — if `STORAGE_*` isn't fully
+  configured, every storage call raises a clear `500
+  storage_not_configured` immediately rather than silently no-op'ing.
+- Migration `0006_contact_photos` — verified in both directions
+  (`upgrade head`, `downgrade -1`, `downgrade base`) against local
+  Postgres 16.
+- 12 new tests (`app/tests/test_uploads.py`), using a small fake storage
+  client monkeypatched in at `app.services.storage._get_client` (matching
+  this codebase's existing style of monkeypatching at the function
+  boundary rather than pulling in a storage-emulation dependency like
+  moto) — presign validation, confirm's never-trust-the-client checks
+  (object not found, oversized-and-deleted), the replace-on-reconfirm
+  behavior, get/delete, and the real unconfigured-storage 500 path. 89
+  tests total on this branch (77 from Milestones 1-5 + 12 new).
+- OpenAPI regenerated; new frontend doc:
+  `docs/frontend-integration/milestone-6-contact-photos.md`, which flags
+  the presigned-POST-vs-PUT difference prominently since it changes what
+  the mobile client actually has to send.
+
+### Tests
+- `pytest`: 89 passed, 0 failed
+- `ruff check app/ alembic/`: clean
+- `mypy app/`: clean
+- `alembic upgrade head`, `downgrade -1`, `downgrade base` for `0006`:
+  verified against local Postgres 16
+
+### Branches / commits
+- Branch: `feat/object-storage` (off `feat/whatsapp-approvals` — needs
+  `Contact`; doesn't actually depend on the WhatsApp work itself, but
+  branching off the current tip keeps the dependency chain linear rather
+  than re-forking off `feat/reminder-scheduler`)
+
+### Ready for frontend
+Everything in `docs/frontend-integration/milestone-6-contact-photos.md`
+— presign → direct-to-R2 upload → confirm → display via `view_url`, plus
+the important "send a multipart POST, not a PUT" detail.
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions —
+   unchanged. `STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY` join the
+   list of backend-only secrets someone needs to add to deploy config.
+2. No orphan-upload sweep (§26.3's daily cleanup job for abandoned
+   presigned uploads nobody ever confirmed) — low-cost, flagged not
+   silently skipped.
+3. No storage cleanup cascade on contact/account deletion yet — tied to
+   the not-yet-built account-deletion flow (§27.2, Phase 13), where the
+   doc itself schedules this cleanup to live.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — seven open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`, `feat/reminder-scheduler`,
+   `feat/whatsapp-approvals`, `feat/object-storage`), none merged to
+   `main`. `feat/redis-infra` is still the one sibling never folded into
+   this line — needs its own separate merge, as noted in prior sessions.
+2. Remaining architecture-doc phases not yet started: PayPal payments
+   (§23/§24), GDPR export/account deletion (§27) — the latter is also
+   where the storage orphan-cleanup and cascade-delete gaps above get
+   closed.

@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routers import approvals, auth, contacts, notifications, reminders
+from app.api.routers import approvals, auth, contacts, notifications, reminders, uploads
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCodes
 from app.core.rate_limiter import init_rate_limiter
@@ -62,6 +62,10 @@ openapi_tags = [
     {
         "name": "mobile-approvals",
         "description": "WhatsApp pending-approval queue (approve/report-opened/dismiss)",
+    },
+    {
+        "name": "mobile-uploads",
+        "description": "Contact photo upload (presigned Cloudflare R2 upload + confirm)",
     },
 ]
 
@@ -189,6 +193,7 @@ app.include_router(
     notifications.router, prefix="/mobile/notifications", tags=["mobile-notifications"]
 )
 app.include_router(approvals.router, prefix="/mobile/approvals", tags=["mobile-approvals"])
+app.include_router(uploads.router, prefix="/mobile/uploads", tags=["mobile-uploads"])
 
 
 @app.get("/health", summary="Service health")
