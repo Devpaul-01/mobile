@@ -14,15 +14,22 @@ Milestone 5 added PendingApproval / ApprovalHistory — the WhatsApp
 pending-approval state machine, §17, Phase 9. This is the one remaining
 channel from Milestone 4's scheduler that previously only logged a
 warning and did nothing; it's now wired to the real state machine.
-Milestone 6 (this revision) adds ContactPhoto — object storage metadata,
-§26, Phase 11. One optional photo per contact (enforced via a unique
-constraint on ``contact_id``, matching §26's explicit MVP scope note),
-backed by Cloudflare R2 rather than AWS S3 per an explicit team decision
-(R2's API is S3-compatible, so this needed no deviation from §26's
-design — only the client's ``endpoint_url`` differs; see
-app/services/storage.py). Subscriptions/payments are still deferred to
-later milestones — not stubbed here, since an empty table nobody writes
-to yet is dead weight, not scaffolding.
+Milestone 6 added ContactPhoto — object storage metadata, §26, Phase 11.
+One optional photo per contact (enforced via a unique constraint on
+``contact_id``, matching §26's explicit MVP scope note), backed by
+Cloudflare R2 rather than AWS S3 per an explicit team decision (R2's API
+is S3-compatible, so this needed no deviation from §26's design — only
+the client's ``endpoint_url`` differs; see app/services/storage.py).
+
+Milestone 7 (this revision) adds Subscription/Payment — PayPal payments,
+§23/§24, Phase 12. ``Subscription.payment_provider`` is an enum
+(``paypal | apple_iap | google_iap``) per §24's explicit provider-
+agnostic hedge against the unresolved App/Play Store IAP-compliance
+question — only ``paypal`` has a real service behind it in this
+milestone. ``SubscriptionStatus``/``PaymentStatus`` concretize what §36
+leaves as a generic ``status`` string column; the architecture doc
+doesn't enumerate the values, so these are this milestone's own
+necessary concretization, not a literal doc transcription.
 
 Patterns copied from bm-ts/backend/app/db/models.py: UUID primary keys,
 ``server_default=now()`` timestamps, ``ondelete="CASCADE"`` FKs so account
@@ -42,6 +49,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
@@ -51,6 +59,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -732,3 +741,133 @@ class ContactPhoto(Base):
     __table_args__ = (
         UniqueConstraint("contact_id", name="uq_contact_photo_contact_id"),
     )
+
+
+class PaymentProvider(str, enum.Enum):
+    """§24's provider-agnostic hedge: only ``PAYPAL`` has a service behind
+    it in this milestone. ``APPLE_IAP``/``GOOGLE_IAP`` exist as schema
+    values only, so that adding native IAP later (contingent on the still-
+    unresolved App/Play Store compliance question, §24) is a service
+    addition, not a schema rework."""
+
+    PAYPAL = "paypal"
+    APPLE_IAP = "apple_iap"
+    GOOGLE_IAP = "google_iap"
+
+
+class SubscriptionStatus(str, enum.Enum):
+    """Concretizes §36's generic ``status`` column. ``PENDING`` covers the
+    window between "order created" and "order captured" — the architecture
+    doc's §23 flow has the client round-trip through PayPal's hosted
+    approval UI before capture, so a subscription can exist in a
+    not-yet-entitled state for real, observable time."""
+
+    PENDING = "pending"
+    ACTIVE = "active"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class PaymentStatus(str, enum.Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class Subscription(Base):
+    """One row per user (§36: ``user_id`` unique — "one active at a time,
+    mirrors existing partial-unique-index pattern"). Represents the
+    user's current entitlement window, not a literal PayPal recurring-
+    billing agreement: this milestone implements §23's diagrammed flow
+    literally (PayPal **Orders** create-order + capture, not the separate
+    PayPal *Subscriptions* API), so "renewal" here means the user
+    initiating a new create-order/capture round trip before
+    ``current_period_end`` lapses, not a payment PayPal itself triggers
+    automatically. ``provider_subscription_id`` holds the most recently
+    captured PayPal order id, kept for traceability against PayPal's own
+    dashboard — not a true recurring-agreement id, since none exists in
+    this flow.
+
+    This is a deliberate, explicitly-flagged interpretation: §23's own
+    diagram shows ``create-order``/``capture`` (Orders API), and §35's API
+    inventory lists exactly those two payment endpoints plus a webhook —
+    nothing in either section names the Subscriptions API's
+    ``create-subscription`` endpoint. The webhook endpoint still exists
+    per §23's "webhooks handle ongoing lifecycle state" framing, so a
+    future move to true recurring billing can land without a schema
+    change beyond what's already here.
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    payment_provider: Mapped[PaymentProvider] = mapped_column(
+        Enum(PaymentProvider, name="payment_provider", native_enum=False, length=20),
+        nullable=False,
+        server_default=text("'paypal'"),
+    )
+    provider_subscription_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    plan: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[SubscriptionStatus] = mapped_column(
+        Enum(SubscriptionStatus, name="subscription_status", native_enum=False, length=20),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cancel_at_period_end: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    payments: Mapped[list["Payment"]] = relationship(
+        "Payment", back_populates="subscription", cascade="all, delete-orphan"
+    )
+
+
+class Payment(Base):
+    """One row per PayPal order (§12.2: "capturing a PayPal order must be
+    idempotent on ``paypal_order_id`` — a unique constraint on that column
+    prevents double-processing if the client retries after a timeout").
+    """
+
+    __tablename__ = "payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    subscription_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider_order_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[PaymentStatus] = mapped_column(
+        Enum(PaymentStatus, name="payment_status", native_enum=False, length=20),
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    subscription: Mapped["Subscription"] = relationship("Subscription", back_populates="payments")
+
+    __table_args__ = (Index("idx_payments_subscription_id", "subscription_id"),)

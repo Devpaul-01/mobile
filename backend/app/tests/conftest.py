@@ -42,11 +42,16 @@ from app.db.models import (
     ContactPhoto,
     EmailVerificationToken,
     PasswordResetToken,
+    Payment,
+    PaymentProvider,
+    PaymentStatus,
     PendingApproval,
     PushToken,
     Reminder,
     ReminderOccurrence,
     RevokedToken,
+    Subscription,
+    SubscriptionStatus,
     User,
     UserSession,
 )
@@ -165,6 +170,29 @@ def _set_approval_history_defaults(mapper, connection, target):
 def _set_contact_photo_defaults(mapper, connection, target):
     if getattr(target, "uploaded_at", None) is None:
         target.uploaded_at = datetime.now(timezone.utc)
+
+
+@sa_event.listens_for(Subscription, "before_insert")
+def _set_subscription_defaults(mapper, connection, target):
+    now = datetime.now(timezone.utc)
+    if getattr(target, "created_at", None) is None:
+        target.created_at = now
+    if getattr(target, "updated_at", None) is None:
+        target.updated_at = now
+    if getattr(target, "payment_provider", None) is None:
+        target.payment_provider = PaymentProvider.PAYPAL
+    if getattr(target, "status", None) is None:
+        target.status = SubscriptionStatus.PENDING
+    if getattr(target, "cancel_at_period_end", None) is None:
+        target.cancel_at_period_end = False
+
+
+@sa_event.listens_for(Payment, "before_insert")
+def _set_payment_defaults(mapper, connection, target):
+    if getattr(target, "created_at", None) is None:
+        target.created_at = datetime.now(timezone.utc)
+    if getattr(target, "status", None) is None:
+        target.status = PaymentStatus.PENDING
 
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

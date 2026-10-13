@@ -579,14 +579,10 @@ paths:
       tags:
       - mobile-contacts
       summary: Import Contacts Endpoint
-      description: 'Import a batch of device contacts, deduping against existing ones.
-
-
-        See ``app/services/dedup.py`` for the full matching rules (§15.2). This
-
-        endpoint is a thin transactional wrapper around that service — all the
-
-        create/update/flag decisions happen there.'
+      description: "Import a batch of device contacts, deduping against existing ones.\n\
+        \nSee ``app/services/dedup.py`` for the full matching rules (\xA715.2). This\n\
+        endpoint is a thin transactional wrapper around that service \u2014 all the\n\
+        create/update/flag decisions happen there."
       operationId: import_contacts_endpoint_mobile_contacts_import_post
       requestBody:
         content:
@@ -1731,6 +1727,199 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Internal Server Error
+  /mobile/payments/status:
+    get:
+      tags:
+      - mobile-payments
+      summary: Get Status
+      operationId: get_status_mobile_payments_status_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                anyOf:
+                - $ref: '#/components/schemas/SubscriptionStatusOut'
+                - $ref: '#/components/schemas/NoSubscriptionOut'
+                title: Response Get Status Mobile Payments Status Get
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/payments/paypal/create-order:
+    post:
+      tags:
+      - mobile-payments
+      summary: Create Order
+      operationId: create_order_mobile_payments_paypal_create_order_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/payments/paypal/capture:
+    post:
+      tags:
+      - mobile-payments
+      summary: Capture Order
+      operationId: capture_order_mobile_payments_paypal_capture_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptureOrderRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaptureOrderResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/payments/paypal/webhook:
+    post:
+      tags:
+      - mobile-payments
+      summary: Paypal Webhook
+      operationId: paypal_webhook_mobile_payments_paypal_webhook_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: Bad Gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /health:
     get:
       summary: Service health
@@ -1752,17 +1941,12 @@ components:
       enum:
       - whatsapp
       title: ApprovalChannel
-      description: 'Only ``whatsapp`` exists today — this is a separate enum (rather
-
-        than reusing ``ReminderChannel``) because a ``PendingApproval`` only
-
-        ever exists *for* the whatsapp channel (§17); push/email never create
-
-        one. Kept as its own enum rather than a hardcoded string so a second
-
-        approval-gated channel, if one is ever added, doesn''t need a schema
-
-        migration just to widen a string column''s implied meaning.'
+      description: "Only ``whatsapp`` exists today \u2014 this is a separate enum\
+        \ (rather\nthan reusing ``ReminderChannel``) because a ``PendingApproval``\
+        \ only\never exists *for* the whatsapp channel (\xA717); push/email never\
+        \ create\none. Kept as its own enum rather than a hardcoded string so a second\n\
+        approval-gated channel, if one is ever added, doesn't need a schema\nmigration\
+        \ just to widen a string column's implied meaning."
     ApprovalListResponse:
       properties:
         items:
@@ -1837,19 +2021,33 @@ components:
       - expired
       - dismissed
       title: ApprovalState
-      description: 'States for the WhatsApp pending-approval state machine
-
-        (MOBILE_APP_ARCHITECTURE_SPEC.md §17.1). WhatsApp can never be
-
-        auto-sent, so the backend''s job stops at handing the user a
-
-        pre-filled deep link — these states track how far that handoff got,
-
-        not whether the message was actually delivered inside WhatsApp
-
-        (unobservable from here; see ``COMPLETED``''s docstring note on the
-
-        approval service).'
+      description: "States for the WhatsApp pending-approval state machine\n(MOBILE_APP_ARCHITECTURE_SPEC.md\
+        \ \xA717.1). WhatsApp can never be\nauto-sent, so the backend's job stops\
+        \ at handing the user a\npre-filled deep link \u2014 these states track how\
+        \ far that handoff got,\nnot whether the message was actually delivered inside\
+        \ WhatsApp\n(unobservable from here; see ``COMPLETED``'s docstring note on\
+        \ the\napproval service)."
+    CaptureOrderRequest:
+      properties:
+        paypal_order_id:
+          type: string
+          title: Paypal Order Id
+      type: object
+      required:
+      - paypal_order_id
+      title: CaptureOrderRequest
+    CaptureOrderResponse:
+      properties:
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        plan:
+          type: string
+          title: Plan
+      type: object
+      required:
+      - status
+      - plan
+      title: CaptureOrderResponse
     ContactImportBirthday:
       properties:
         month:
@@ -1921,16 +2119,11 @@ components:
       required:
       - value
       title: ContactImportPhone
-      description: 'One phone number for an incoming contact.
-
-
-        ``value`` is the E.164-normalized number when the client succeeded at
-
-        normalizing it, or the original raw string when it didn''t (in which
-
-        case ``normalization_failed`` must be true) — see
-
-        MOBILE_APP_ARCHITECTURE_SPEC.md §15.1 step 4.'
+      description: "One phone number for an incoming contact.\n\n``value`` is the\
+        \ E.164-normalized number when the client succeeded at\nnormalizing it, or\
+        \ the original raw string when it didn't (in which\ncase ``normalization_failed``\
+        \ must be true) \u2014 see\nMOBILE_APP_ARCHITECTURE_SPEC.md \xA715.1 step\
+        \ 4."
     ContactImportRequest:
       properties:
         contacts:
@@ -1983,10 +2176,8 @@ components:
       - name
       - matched_contact_ids
       title: ContactImportReviewItem
-      description: 'One incoming row that matched more than one existing contact and
-        was
-
-        not auto-merged — see MOBILE_APP_ARCHITECTURE_SPEC.md §15.2.'
+      description: "One incoming row that matched more than one existing contact and\
+        \ was\nnot auto-merged \u2014 see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.2."
     ContactListResponse:
       properties:
         items:
@@ -2095,23 +2286,14 @@ components:
       - device_import
       - manual
       title: ContactSource
-      description: 'Where a contact''s data came from — affects how import merges
-        treat it
-
-        (see MOBILE_APP_ARCHITECTURE_SPEC.md §15.3): a ``manual`` contact''s
-
-        birthday is never silently overwritten by a later device re-import.
-
-
-        ``future_calendar_import`` and ``extension_sync`` from the architecture
-
-        doc''s enum are not included as values here yet — nothing in this
-
-        codebase can produce either of them, and an unused enum value is a
-
-        speculative API surface, not a harmless placeholder. Adding one is a
-
-        single-line migration when the feature that produces it actually ships.'
+      description: "Where a contact's data came from \u2014 affects how import merges\
+        \ treat it\n(see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.3): a ``manual`` contact's\n\
+        birthday is never silently overwritten by a later device re-import.\n\n``future_calendar_import``\
+        \ and ``extension_sync`` from the architecture\ndoc's enum are not included\
+        \ as values here yet \u2014 nothing in this\ncodebase can produce either of\
+        \ them, and an unused enum value is a\nspeculative API surface, not a harmless\
+        \ placeholder. Adding one is a\nsingle-line migration when the feature that\
+        \ produces it actually ships."
     ContactUpdate:
       properties:
         name:
@@ -2150,6 +2332,29 @@ components:
           title: Notes
       type: object
       title: ContactUpdate
+    CreateOrderRequest:
+      properties:
+        plan:
+          type: string
+          title: Plan
+          description: 'One of: monthly, yearly'
+      type: object
+      required:
+      - plan
+      title: CreateOrderRequest
+    CreateOrderResponse:
+      properties:
+        paypal_order_id:
+          type: string
+          title: Paypal Order Id
+        approval_url:
+          type: string
+          title: Approval Url
+      type: object
+      required:
+      - paypal_order_id
+      - approval_url
+      title: CreateOrderResponse
     ErrorResponse:
       properties:
         detail:
@@ -2204,7 +2409,7 @@ components:
       - email
       - password
       title: LoginRequest
-      description: Login credentials — email + plaintext password.
+      description: "Login credentials \u2014 email + plaintext password."
     MessageResponse:
       properties:
         message:
@@ -2214,6 +2419,29 @@ components:
       required:
       - message
       title: MessageResponse
+    NoSubscriptionOut:
+      properties:
+        status:
+          type: string
+          title: Status
+          default: none
+      type: object
+      title: NoSubscriptionOut
+      description: "Returned by ``GET /status`` when the user has never subscribed\
+        \ \u2014\ndistinct from an expired/cancelled ``Subscription`` row, which still\n\
+        carries real history worth returning."
+    PaymentProvider:
+      type: string
+      enum:
+      - paypal
+      - apple_iap
+      - google_iap
+      title: PaymentProvider
+      description: "\xA724's provider-agnostic hedge: only ``PAYPAL`` has a service\
+        \ behind\nit in this milestone. ``APPLE_IAP``/``GOOGLE_IAP`` exist as schema\n\
+        values only, so that adding native IAP later (contingent on the still-\nunresolved\
+        \ App/Play Store compliance question, \xA724) is a service\naddition, not\
+        \ a schema rework."
     PushPlatform:
       type: string
       enum:
@@ -2283,14 +2511,14 @@ components:
           maxLength: 128
           minLength: 8
           title: Password
-          description: 8–128 characters
+          description: "8\u2013128 characters"
       type: object
       required:
       - email
       - password
       title: RegisterRequest
-      description: Registration payload — email is validated as a proper address;
-        password minimum 8 chars.
+      description: "Registration payload \u2014 email is validated as a proper address;\
+        \ password minimum 8 chars."
     ReminderBulkCreate:
       properties:
         contact_ids:
@@ -2317,14 +2545,10 @@ components:
       required:
       - contact_ids
       title: ReminderBulkCreate
-      description: 'Apply one reminder definition to several selected contacts at
-        once —
-
-        the explicit feature request this milestone exists for. No persisted
-
-        Group entity: ``contact_ids`` is a plain multi-select, scoped to this
-
-        one call.'
+      description: "Apply one reminder definition to several selected contacts at\
+        \ once \u2014\nthe explicit feature request this milestone exists for. No\
+        \ persisted\nGroup entity: ``contact_ids`` is a plain multi-select, scoped\
+        \ to this\none call."
     ReminderBulkCreateResponse:
       properties:
         created:
@@ -2494,6 +2718,45 @@ components:
       - token
       - new_password
       title: ResetPasswordRequest
+    SubscriptionStatus:
+      type: string
+      enum:
+      - pending
+      - active
+      - cancelled
+      - expired
+      title: SubscriptionStatus
+      description: "Concretizes \xA736's generic ``status`` column. ``PENDING`` covers\
+        \ the\nwindow between \"order created\" and \"order captured\" \u2014 the\
+        \ architecture\ndoc's \xA723 flow has the client round-trip through PayPal's\
+        \ hosted\napproval UI before capture, so a subscription can exist in a\nnot-yet-entitled\
+        \ state for real, observable time."
+    SubscriptionStatusOut:
+      properties:
+        plan:
+          type: string
+          title: Plan
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        payment_provider:
+          $ref: '#/components/schemas/PaymentProvider'
+        current_period_end:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Current Period End
+        cancel_at_period_end:
+          type: boolean
+          title: Cancel At Period End
+      type: object
+      required:
+      - plan
+      - status
+      - payment_provider
+      - current_period_end
+      - cancel_at_period_end
+      title: SubscriptionStatusOut
     TokenResponse:
       properties:
         access_token:
@@ -2628,3 +2891,5 @@ tags:
   description: WhatsApp pending-approval queue (approve/report-opened/dismiss)
 - name: mobile-uploads
   description: Contact photo upload (presigned Cloudflare R2 upload + confirm)
+- name: mobile-payments
+  description: PayPal subscription payments (create-order, capture, webhook)

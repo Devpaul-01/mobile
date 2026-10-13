@@ -73,6 +73,22 @@ class Settings(BaseSettings):
         default=None, alias="STORAGE_SECRET_ACCESS_KEY"
     )
 
+    # PayPal (§23/§24, Phase 12) — backend-owned credentials, never sent to
+    # the mobile client (only an approval_url and an order id ever reach
+    # it; see app/services/paypal.py). Optional, same fail-loud-not-
+    # fail-open reasoning as STORAGE_* above: the rest of the app boots
+    # fine without these, but any payment endpoint call raises a clear
+    # 500 paypal_not_configured rather than silently no-op'ing — there's
+    # no sensible degraded mode for "can't actually charge the user."
+    # Defaults to PayPal's sandbox API base; set to
+    # https://api-m.paypal.com for production.
+    paypal_client_id: str | None = Field(default=None, alias="PAYPAL_CLIENT_ID")
+    paypal_client_secret: str | None = Field(default=None, alias="PAYPAL_CLIENT_SECRET")
+    paypal_webhook_id: str | None = Field(default=None, alias="PAYPAL_WEBHOOK_ID")
+    paypal_api_base: str = Field(
+        default="https://api-m.sandbox.paypal.com", alias="PAYPAL_API_BASE"
+    )
+
     log_level: str = Field(default="INFO")
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
     sentry_environment: str = Field(default="development", alias="SENTRY_ENVIRONMENT")

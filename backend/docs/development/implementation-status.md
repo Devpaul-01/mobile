@@ -615,3 +615,140 @@ the important "send a multipart POST, not a PUT" detail.
    (§23/§24), GDPR export/account deletion (§27) — the latter is also
    where the storage orphan-cleanup and cascade-delete gaps above get
    closed.
+
+## Session 7 — 2026-10-13 (branch `feat/paypal-payments`, off `feat/object-storage`)
+
+### What shipped
+- **PayPal payments built** — architecture doc §23/§24, Phase 12.
+  Following the implementation order in §41 (Phase 12 is a prerequisite-
+  satisfied, buildable phase; Phase 13 Account Deletion explicitly lists
+  "all prior phases" as its prerequisite, so payments comes first).
+- **Flow implemented literally as diagrammed in §23**: PayPal's **Orders**
+  API (create-order + capture), not the separate PayPal *Subscriptions*
+  API — flagged explicitly because this is a deliberate reading of an
+  underspecified point. §23's diagram and §35's endpoint inventory name
+  exactly `create-order`/`capture`/`webhook`, never a create-subscription
+  call, so that's what's built. Consequence, stated plainly for whoever
+  picks this up next: there is no PayPal-driven automatic recurring
+  charge in this milestone — a successful capture grants a fixed-duration
+  entitlement (`current_period_end`), and "renewal" means the user (or
+  the app, prompting them) going through create-order/capture again
+  before that date. The webhook endpoint is still fully wired up per
+  §23's "webhooks handle lifecycle state" framing, so a future move to
+  true recurring billing doesn't need a schema change beyond what's here.
+- **Never trusts the client** (§32's table, §23's explicit callout): the
+  mobile app never sees `PAYPAL_CLIENT_SECRET` — only an `approval_url`
+  and an `order_id`. The `/capture` endpoint is the only thing that
+  confirms money changed hands, via a real server-to-server call to
+  PayPal's own Capture API; a client can't forge success by calling
+  `/capture` with a fabricated or not-yet-approved order id, because
+  PayPal itself rejects that.
+- **Schema is provider-agnostic from day one** (§24's explicit hedge
+  against the still-unresolved App/Play Store IAP-compliance question):
+  `Subscription.payment_provider` is an enum (`paypal | apple_iap |
+  google_iap`) — only `paypal` has a real service behind it, but adding
+  native IAP later (contingent on that compliance review) is a service
+  addition, not a schema rework.
+- **New tables**: `subscriptions` (one per user, unique on `user_id`),
+  `payments` (one per PayPal order, unique on `provider_order_id` — the
+  idempotency anchor per §12.2: capturing the same order twice is a
+  no-op, not a double-charge-attempt).
+- **Idempotent capture**: a `/capture` call for an already-`COMPLETED`
+  payment returns the current (already-active) state rather than
+  re-attempting a capture PayPal would reject anyway.
+- **Capture failure is recorded, not swallowed**: if PayPal's capture
+  call fails (order never approved, etc.), the `Payment` row is marked
+  `failed` and the endpoint returns `502 paypal_error` — the subscription
+  is never silently left in an ambiguous state.
+- **Webhook signature verification is real**, not a stub: `/paypal/webhook`
+  calls PayPal's own `verify-webhook-signature` endpoint before trusting
+  anything in the payload (never reimplements PayPal's certificate-chain
+  validation locally) — `PAYMENT.CAPTURE.COMPLETED` activates a
+  subscription (idempotently, alongside the client-driven capture path),
+  `PAYMENT.CAPTURE.DENIED`/`REFUNDED` cancels it. An unrecognized event
+  type or an order id with no matching `Payment` row is a graceful no-op
+  (still 200), not an error — PayPal retries any endpoint that doesn't
+  ack cleanly.
+- **Fail-loud, not fail-open, config** — same philosophy as object
+  storage (§26) and explicitly contrasted with Redis's fail-open pattern
+  in this module's docstrings: a missing `PAYPAL_*` setting raises a
+  clear `500 paypal_not_configured` the moment a payment endpoint is
+  actually called, rather than silently no-op'ing — there's no sensible
+  degraded mode for "can't actually charge the user."
+- **Pricing is an explicit placeholder**: `monthly`/`yearly` plan prices
+  live in a `PLAN_CATALOG` constant in `app/services/paypal.py`, flagged
+  in both the code and the frontend doc as MVP starting values needing
+  real business sign-off before launch — the architecture doc specifies
+  no concrete prices anywhere, so this had to be concretized somewhere.
+- Migration `0007_subscriptions_and_payments` — verified in both
+  directions (`upgrade head`, `downgrade -1`, `downgrade base`, re-upgrade
+  to `head`) against local Postgres 16.
+- 15 new tests (`app/tests/test_payments.py`), using a fake PayPal server
+  monkeypatched at the single network chokepoint
+  `app.services.paypal._request` (matching this codebase's established
+  mocking style — see test_uploads.py, test_scheduler.py) — covers
+  create-order validation and the already-subscribed guard, capture's
+  ownership check (400 `order_mismatch`, deliberately 400 not 404 here
+  per §35's own documented response shape for this one endpoint),
+  capture idempotency, capture failure marking the payment `failed`, and
+  the webhook's signature check plus both its activate and cancel paths.
+  119 tests total on this branch (104 from Milestones 1-6 + 15 new).
+- OpenAPI regenerated (28 paths, up from 24, including the 4 new
+  `/mobile/payments/*` endpoints); new frontend doc:
+  `docs/frontend-integration/milestone-7-paypal-payments.md`, which
+  states the Orders-vs-Subscriptions-API distinction up front since it
+  changes what "renewal" means for anyone building the subscription UI.
+- `httpx` moved from a test-only dependency to a real one (`paypal.py`
+  makes actual HTTP calls to PayPal at runtime, not just in tests).
+
+### Tests
+- `pytest`: 119 passed, 0 failed
+- `ruff check app/ alembic/`: clean
+- `mypy app/`: clean (44 source files)
+- `alembic upgrade head`, `downgrade -1`, `downgrade base`, re-`upgrade
+  head` for `0007`: verified against local Postgres 16
+
+### Branches / commits
+- Branch: `feat/paypal-payments` (off `feat/object-storage`)
+
+### Ready for frontend
+Everything in `docs/frontend-integration/milestone-7-paypal-payments.md`
+— create-order → open approval_url in an in-app browser → capture → poll
+status, plus the important "this isn't recurring billing yet" framing.
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions —
+   unchanged. `PAYPAL_CLIENT_ID`/`PAYPAL_CLIENT_SECRET`/`PAYPAL_WEBHOOK_ID`
+   join the list of backend-only secrets someone needs to add to deploy
+   config, plus the PayPal developer-dashboard webhook URL configuration
+   (a one-time manual step, not something this code can do for itself).
+2. **No true recurring billing** — see "What shipped" above. If the
+   product actually needs PayPal to auto-charge renewals, this is a real
+   follow-up scope item (a move to PayPal's Subscriptions API), not a bug.
+3. **App Store/Play Store IAP compliance (§24) remains unresolved** —
+   this was never this milestone's job to resolve (the doc itself frames
+   it as requiring legal/policy review), but it's a real blocker before
+   either store submission and is called out again here so it doesn't
+   get lost.
+4. **No per-user rate limiting** on `create-order` (§29 specifies 10/hr
+   per user) — needs the Redis-backed per-user limiter from Phase 10,
+   which is a separate, not-yet-merged sibling branch
+   (`feat/redis-infra`) in this project's history. Flagged, not silently
+   skipped.
+5. Pricing is a placeholder (see "What shipped") — needs real business
+   sign-off before launch.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — eight open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`, `feat/reminder-scheduler`,
+   `feat/whatsapp-approvals`, `feat/object-storage`,
+   `feat/paypal-payments`), none merged to `main`. `feat/redis-infra` is
+   still the one sibling never folded into this line.
+2. Remaining architecture-doc phase not yet started: GDPR export/account
+   deletion (§27, Phase 13) — per §41, this is the last phase, and its
+   own prerequisite is "all prior phases," which (modulo the Redis
+   sibling branch) this milestone now completes. It's also where the
+   object-storage orphan-cleanup and cascade-delete gaps noted in Session
+   6 get closed, and where PayPal subscription cancellation on account
+   deletion (§27.2 step 1) gets wired up.

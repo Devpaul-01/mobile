@@ -49,6 +49,15 @@ class ErrorCodes:
     UPLOAD_NOT_FOUND = "upload_not_found"
     STORAGE_NOT_CONFIGURED = "storage_not_configured"
 
+    # Payments / PayPal (§23/§24)
+    ALREADY_SUBSCRIBED = "already_subscribed"
+    INVALID_PLAN = "invalid_plan"
+    ORDER_NOT_FOUND = "order_not_found"
+    ORDER_MISMATCH = "order_mismatch"
+    PAYPAL_ERROR = "paypal_error"
+    PAYPAL_NOT_CONFIGURED = "paypal_not_configured"
+    INVALID_WEBHOOK_SIGNATURE = "invalid_webhook_signature"
+
     # System
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     VALIDATION_ERROR = "validation_error"
