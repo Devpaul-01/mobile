@@ -43,12 +43,17 @@ Downstream actions on a newly-created occurrence
   ``email_status``/``email_attempts``/``email_sent_at`` tracked on the
   occurrence per §16.3's retry-up-to-3-times contract (see
   ``retry_failed_emails`` below for the next-pass retry half of that).
-- ``whatsapp`` in ``channels`` → **not implemented yet.** The architecture
-  doc's answer here is a ``PendingApproval`` row (Phase 9's state
-  machine), which doesn't exist in this codebase. An occurrence is still
-  created (so the yearly-fire bookkeeping stays correct once Phase 9 is
-  built), but nothing is sent or queued for WhatsApp today — flagged
-  loudly here rather than silently dropped.
+- ``whatsapp`` in ``channels`` → creates a ``PendingApproval`` row (§17,
+  Phase 9's state machine — see app/services/approvals.py) rather than
+  sending anything itself, and also sends a push notification pointing
+  at the Approval Queue (§17.2 — this happens regardless of whether
+  ``push`` is itself one of the reminder's own channels). WhatsApp can
+  never be auto-sent; this is the hand-off point to the mobile approval
+  queue, where the user taps "Send via WhatsApp" themselves.
+
+This module also runs ``expire_stale_approvals`` each cycle (§17.2) —
+any approval still ``PENDING_APPROVAL`` after 7 days is marked ``EXPIRED``,
+not deleted.
 """
 
 from __future__ import annotations
@@ -64,8 +69,9 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import Contact, EmailStatus, PushToken, Reminder, ReminderOccurrence, User
 from app.db.session import AsyncSessionLocal
+from app.services.approvals import create_pending_approval, expire_stale_approvals
 from app.services.email import send_reminder_email
-from app.services.push import send_push_notification
+from app.services.push import send_approval_queue_push, send_push_notification
 
 logger = logging.getLogger(__name__)
 
@@ -215,11 +221,17 @@ async def _trigger_downstream_actions(
     user: User,
     occurrence: ReminderOccurrence,
 ) -> None:
+    push_tokens: list[PushToken] | None = None
+
+    async def _load_push_tokens() -> list[PushToken]:
+        nonlocal push_tokens
+        if push_tokens is None:
+            result = await db.execute(select(PushToken).where(PushToken.user_id == user.id))
+            push_tokens = list(result.scalars().all())
+        return push_tokens
+
     if "push" in reminder.channels:
-        tokens_result = await db.execute(
-            select(PushToken).where(PushToken.user_id == user.id)
-        )
-        for push_token in tokens_result.scalars().all():
+        for push_token in await _load_push_tokens():
             await send_push_notification(
                 device_token=push_token.device_token, contact_name=contact.name
             )
@@ -234,11 +246,19 @@ async def _trigger_downstream_actions(
         await db.flush()
 
     if "whatsapp" in reminder.channels:
-        logger.warning(
-            "Reminder occurrence %s requests whatsapp but the pending-approval "
-            "state machine (Phase 9) isn't built yet — nothing sent.",
-            occurrence.id,
+        await create_pending_approval(
+            db,
+            reminder_occurrence_id=occurrence.id,
+            user_id=user.id,
+            contact_id=contact.id,
         )
+        # §17.2: creating a PendingApproval also triggers a push pointing
+        # at the Approval Queue — regardless of whether "push" is itself
+        # one of this reminder's own channels.
+        for push_token in await _load_push_tokens():
+            await send_approval_queue_push(
+                device_token=push_token.device_token, contact_name=contact.name
+            )
 
 
 async def retry_failed_emails(db: AsyncSession) -> int:
@@ -282,10 +302,10 @@ async def retry_failed_emails(db: AsyncSession) -> int:
 async def run_scheduler_cycle() -> None:
     """The actual periodic job body — opens its own session (this runs
     outside any HTTP request), takes the distributed lock, evaluates
-    reminders, retries failed emails, commits, and always releases the
-    lock and closes the session. This is what ``init_scheduler`` below
-    points APScheduler at; call it directly in a one-off script/shell if
-    you ever need to trigger a cycle by hand.
+    reminders, retries failed emails, sweeps stale approvals, commits,
+    and always releases the lock and closes the session. This is what
+    ``init_scheduler`` below points APScheduler at; call it directly in
+    a one-off script/shell if you ever need to trigger a cycle by hand.
     """
     async with AsyncSessionLocal() as db:
         acquired = await _try_acquire_scheduler_lock(db)
@@ -297,12 +317,15 @@ async def run_scheduler_cycle() -> None:
         try:
             created = await evaluate_reminders(db)
             retried = await retry_failed_emails(db)
+            expired = await expire_stale_approvals(db)
             await db.commit()
-            if created or retried:
+            if created or retried or expired:
                 logger.info(
-                    "Scheduler cycle: %d occurrence(s) created, %d email retry(ies).",
+                    "Scheduler cycle: %d occurrence(s) created, %d email retry(ies), "
+                    "%d approval(s) expired.",
                     len(created),
                     retried,
+                    expired,
                 )
         except Exception:
             await db.rollback()

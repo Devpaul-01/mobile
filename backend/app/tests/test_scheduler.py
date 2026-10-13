@@ -13,9 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.db.models import (
+    ApprovalState,
     Contact,
     ContactSource,
     EmailStatus,
+    PendingApproval,
     PushPlatform,
     PushToken,
     Reminder,
@@ -233,12 +235,13 @@ async def test_evaluate_reminders_marks_email_sent_on_success(db_session: AsyncS
     assert occurrence.email_sent_at is not None
 
 
-async def test_evaluate_reminders_creates_occurrence_for_whatsapp_without_sending(
+async def test_evaluate_reminders_creates_pending_approval_for_whatsapp(
     db_session: AsyncSession,
 ):
-    """whatsapp is flagged as unimplemented (Phase 9) — the occurrence
-    bookkeeping must still happen so the yearly-fire record stays correct
-    once the pending-approval state machine lands."""
+    """whatsapp can never be auto-sent (§17) — firing a whatsapp-channel
+    reminder must create a PendingApproval row (not send anything), while
+    the occurrence bookkeeping still happens exactly as for any other
+    channel."""
     user = await _make_user(db_session, "whatsappuser@example.com", "UTC")
     contact = await _make_contact(db_session, user.id, month=10, day=10)
     await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["whatsapp"])
@@ -249,6 +252,43 @@ async def test_evaluate_reminders_creates_occurrence_for_whatsapp_without_sendin
 
     assert len(created) == 1
     assert created[0].email_status is None
+
+    result = await db_session.execute(
+        select(PendingApproval).where(
+            PendingApproval.reminder_occurrence_id == created[0].id
+        )
+    )
+    approval = result.scalar_one()
+    assert approval.state == ApprovalState.PENDING_APPROVAL
+    assert approval.contact_id == contact.id
+    assert approval.user_id == user.id
+
+
+async def test_evaluate_reminders_sends_approval_queue_push_for_whatsapp(
+    db_session: AsyncSession, monkeypatch
+):
+    """§17.2: creating a PendingApproval also triggers a push pointing at
+    the Approval Queue, even though "push" isn't one of this reminder's
+    own channels."""
+    user = await _make_user(db_session, "whatsapppushuser@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=11, day=20)
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["whatsapp"])
+    db_session.add(PushToken(user_id=user.id, device_token="wa-token", platform=PushPlatform.IOS))
+    await db_session.flush()
+
+    calls = []
+
+    async def _record(*, device_token: str, contact_name: str) -> None:
+        calls.append((device_token, contact_name))
+
+    monkeypatch.setattr("app.services.scheduler.send_approval_queue_push", _record)
+
+    now = datetime(datetime.now(timezone.utc).year, 11, 20, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_reminders(db_session, now=now)
+    await db_session.commit()
+
+    assert len(created) == 1
+    assert calls == [("wa-token", contact.name)]
 
 
 # ---------------------------------------------------------------------------

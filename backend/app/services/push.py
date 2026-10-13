@@ -21,3 +21,18 @@ async def send_push_notification(*, device_token: str, contact_name: str) -> Non
         contact_name,
         device_token,
     )
+
+
+async def send_approval_queue_push(*, device_token: str, contact_name: str) -> None:
+    """A distinct notification from ``send_push_notification`` above — this
+    one tells the user something is waiting in their Approval Queue
+    (architecture doc §17.2: creating a ``PendingApproval`` "also triggers
+    a push notification pointing at the Approval Queue screen"), sent
+    regardless of whether ``push`` is also one of the reminder's own
+    channels. Still a logging stub, same as every other send in this
+    module today."""
+    logger.info(
+        "[dev push stub] WhatsApp approval waiting for %s, to device token %s",
+        contact_name,
+        device_token,
+    )

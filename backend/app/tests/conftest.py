@@ -34,10 +34,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.db.base import Base
 from app.db.models import (
+    ApprovalChannel,
+    ApprovalHistory,
+    ApprovalState,
     Contact,
     ContactIdentifier,
     EmailVerificationToken,
     PasswordResetToken,
+    PendingApproval,
     PushToken,
     Reminder,
     ReminderOccurrence,
@@ -135,6 +139,25 @@ def _set_push_token_defaults(mapper, connection, target):
         target.created_at = now
     if getattr(target, "last_used_at", None) is None:
         target.last_used_at = now
+
+
+@sa_event.listens_for(PendingApproval, "before_insert")
+def _set_pending_approval_defaults(mapper, connection, target):
+    now = datetime.now(timezone.utc)
+    if getattr(target, "created_at", None) is None:
+        target.created_at = now
+    if getattr(target, "updated_at", None) is None:
+        target.updated_at = now
+    if getattr(target, "channel", None) is None:
+        target.channel = ApprovalChannel.WHATSAPP
+    if getattr(target, "state", None) is None:
+        target.state = ApprovalState.PENDING_APPROVAL
+
+
+@sa_event.listens_for(ApprovalHistory, "before_insert")
+def _set_approval_history_defaults(mapper, connection, target):
+    if getattr(target, "at", None) is None:
+        target.at = datetime.now(timezone.utc)
 
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

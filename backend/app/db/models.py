@@ -7,14 +7,16 @@ Milestone 3 added Reminder — scoped specifically to "apply a reminder to
 several selected contacts at once" per an explicit team scope answer
 (multi-select contacts at creation time, no persisted Group entity), not
 the full scheduler/occurrence/push/email/approval machinery.
-Milestone 4 (this revision) adds ReminderOccurrence (the scheduler's
-idempotency anchor, §16.1) and PushToken (device push-token registration,
-§12.2) — i.e. Phase 6 plus a minimal Phase 7 slice. PendingApproval /
-ApprovalHistory (the WhatsApp state machine, Phase 9) are still deferred —
-a large, separate state machine of their own, not bundled in here.
-Subscriptions/payments are still deferred to later milestones too — not
-stubbed here, since an empty table nobody writes to yet is dead weight, not
-scaffolding.
+Milestone 4 added ReminderOccurrence (the scheduler's idempotency anchor,
+§16.1) and PushToken (device push-token registration, §12.2) — i.e. Phase
+6 plus a minimal Phase 7 slice.
+Milestone 5 (this revision) adds PendingApproval / ApprovalHistory — the
+WhatsApp pending-approval state machine, §17, Phase 9. This is the one
+remaining channel from Milestone 4's scheduler that previously only
+logged a warning and did nothing; it's now wired to the real state
+machine. Subscriptions/payments are still deferred to later milestones —
+not stubbed here, since an empty table nobody writes to yet is dead
+weight, not scaffolding.
 
 Patterns copied from bm-ts/backend/app/db/models.py: UUID primary keys,
 ``server_default=now()`` timestamps, ``ondelete="CASCADE"`` FKs so account
@@ -543,3 +545,147 @@ class PushToken(Base):
         UniqueConstraint("user_id", "device_token", name="uq_push_token_user_device"),
         Index("idx_push_tokens_user_id", "user_id"),
     )
+
+
+class ApprovalState(str, enum.Enum):
+    """States for the WhatsApp pending-approval state machine
+    (MOBILE_APP_ARCHITECTURE_SPEC.md §17.1). WhatsApp can never be
+    auto-sent, so the backend's job stops at handing the user a
+    pre-filled deep link — these states track how far that handoff got,
+    not whether the message was actually delivered inside WhatsApp
+    (unobservable from here; see ``COMPLETED``'s docstring note on the
+    approval service)."""
+
+    PENDING_APPROVAL = "pending_approval"
+    APPROVED = "approved"
+    COMPLETED = "completed"
+    LINK_FAILED = "link_failed"
+    EXPIRED = "expired"
+    DISMISSED = "dismissed"
+
+
+class ApprovalChannel(str, enum.Enum):
+    """Only ``whatsapp`` exists today — this is a separate enum (rather
+    than reusing ``ReminderChannel``) because a ``PendingApproval`` only
+    ever exists *for* the whatsapp channel (§17); push/email never create
+    one. Kept as its own enum rather than a hardcoded string so a second
+    approval-gated channel, if one is ever added, doesn't need a schema
+    migration just to widen a string column's implied meaning."""
+
+    WHATSAPP = "whatsapp"
+
+
+class ApprovalActor(str, enum.Enum):
+    """Who caused an ``ApprovalHistory`` transition — §17.4."""
+
+    USER = "user"
+    SCHEDULER = "scheduler"
+    SYSTEM = "system"
+
+
+class PendingApproval(Base):
+    """One row per WhatsApp send awaiting the user's manual tap-to-send
+    (MOBILE_APP_ARCHITECTURE_SPEC.md §17). Created by the scheduler
+    (``app/services/scheduler.py``) when a firing ``ReminderOccurrence``
+    requests the ``whatsapp`` channel — never created directly by an API
+    call, since the whole point of this table is that the *scheduler*
+    decided a WhatsApp reminder is due; the API only ever moves an
+    existing row through its states (approve/report-opened/dismiss).
+
+    The unique constraint on ``reminder_occurrence_id`` is belt-and-
+    suspenders alongside the occurrence table's own
+    ``(reminder_id, occurrence_year)`` uniqueness (§17.3) — even if the
+    scheduler somehow re-evaluated the same occurrence, it couldn't
+    create a second approval row for it.
+
+    Not soft-deleted (§14's convention for this table): an approval is
+    either actioned, expired, or dismissed — there's no "undo" concept
+    that soft-delete would need to preserve, unlike ``Contact``.
+    """
+
+    __tablename__ = "pending_approvals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    reminder_occurrence_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("reminder_occurrences.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    channel: Mapped[ApprovalChannel] = mapped_column(
+        Enum(ApprovalChannel, name="approval_channel", native_enum=False, length=20),
+        nullable=False,
+        server_default=text("'whatsapp'"),
+    )
+    state: Mapped[ApprovalState] = mapped_column(
+        Enum(ApprovalState, name="approval_state", native_enum=False, length=20),
+        nullable=False,
+        server_default=text("'pending_approval'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    contact: Mapped["Contact"] = relationship("Contact")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "reminder_occurrence_id", name="uq_pending_approval_occurrence"
+        ),
+        Index("idx_pending_approvals_user_id", "user_id"),
+    )
+
+
+class ApprovalHistory(Base):
+    """Audit trail of every state transition a ``PendingApproval`` goes
+    through (§17.4) — kept as an append-only log rather than only
+    tracking current state, so "did the user see this and dismiss it, or
+    never see it at all" (DISMISSED vs EXPIRED) stays answerable later.
+
+    ``from_state`` is nullable only for the very first row (creation —
+    there is no prior state to record); every subsequent transition has
+    one.
+    """
+
+    __tablename__ = "approval_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    approval_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("pending_approvals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    from_state: Mapped[ApprovalState | None] = mapped_column(
+        Enum(ApprovalState, name="approval_history_from_state", native_enum=False, length=20),
+        nullable=True,
+    )
+    to_state: Mapped[ApprovalState] = mapped_column(
+        Enum(ApprovalState, name="approval_history_to_state", native_enum=False, length=20),
+        nullable=False,
+    )
+    actor: Mapped[ApprovalActor] = mapped_column(
+        Enum(ApprovalActor, name="approval_actor", native_enum=False, length=20),
+        nullable=False,
+    )
+    at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (Index("idx_approval_history_approval_id", "approval_id"),)
