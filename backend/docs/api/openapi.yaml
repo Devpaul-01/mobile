@@ -1920,6 +1920,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /mobile/account/export:
+    get:
+      tags:
+      - mobile-account
+      summary: Export Account
+      operationId: export_account_mobile_account_export_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Export Account Mobile Account Export Get
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/account:
+    delete:
+      tags:
+      - mobile-account
+      summary: Delete Account Endpoint
+      operationId: delete_account_endpoint_mobile_account_delete
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeleteAccountRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - OAuth2PasswordBearer: []
   /health:
     get:
       summary: Service health
@@ -2355,6 +2399,15 @@ components:
       - paypal_order_id
       - approval_url
       title: CreateOrderResponse
+    DeleteAccountRequest:
+      properties:
+        password:
+          type: string
+          title: Password
+      type: object
+      required:
+      - password
+      title: DeleteAccountRequest
     ErrorResponse:
       properties:
         detail:
@@ -2395,6 +2448,15 @@ components:
       - message
       title: FieldError
       description: A single field-level validation error.
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
     LoginRequest:
       properties:
         email:
@@ -2862,6 +2924,32 @@ components:
       title: UserProfile
       description: Public profile returned by GET /mobile/auth/me. ORM-mapped from
         the ``User`` model.
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
     VerifyEmailRequest:
       properties:
         token:
@@ -2893,3 +2981,5 @@ tags:
   description: Contact photo upload (presigned Cloudflare R2 upload + confirm)
 - name: mobile-payments
   description: PayPal subscription payments (create-order, capture, webhook)
+- name: mobile-account
+  description: GDPR data export and account deletion
