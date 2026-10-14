@@ -692,7 +692,7 @@ the important "send a multipart POST, not a PUT" detail.
   per §35's own documented response shape for this one endpoint),
   capture idempotency, capture failure marking the payment `failed`, and
   the webhook's signature check plus both its activate and cancel paths.
-  119 tests total on this branch (104 from Milestones 1-6 + 15 new).
+  104 tests total on this branch (89 from Milestones 1-6 + 15 new).
 - OpenAPI regenerated (28 paths, up from 24, including the 4 new
   `/mobile/payments/*` endpoints); new frontend doc:
   `docs/frontend-integration/milestone-7-paypal-payments.md`, which
@@ -702,7 +702,7 @@ the important "send a multipart POST, not a PUT" detail.
   makes actual HTTP calls to PayPal at runtime, not just in tests).
 
 ### Tests
-- `pytest`: 119 passed, 0 failed
+- `pytest`: 104 passed, 0 failed
 - `ruff check app/ alembic/`: clean
 - `mypy app/`: clean (44 source files)
 - `alembic upgrade head`, `downgrade -1`, `downgrade base`, re-`upgrade
