@@ -27,7 +27,15 @@ from sqlalchemy import StaticPool, event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.db.base import Base
-from app.db.models import EmailVerificationToken, PasswordResetToken, RevokedToken, User, UserSession
+from app.db.models import (
+    Contact,
+    ContactIdentifier,
+    EmailVerificationToken,
+    PasswordResetToken,
+    RevokedToken,
+    User,
+    UserSession,
+)
 from app.core.security import hash_password
 
 from sqlalchemy import event as sa_event
@@ -71,6 +79,23 @@ def _set_email_verif_created_at(mapper, connection, target):
 def _set_reset_created_at(mapper, connection, target):
     if getattr(target, "created_at", None) is None:
         target.created_at = datetime.now(timezone.utc)
+
+
+@sa_event.listens_for(Contact, "before_insert")
+def _set_contact_defaults(mapper, connection, target):
+    now = datetime.now(timezone.utc)
+    if getattr(target, "created_at", None) is None:
+        target.created_at = now
+    if getattr(target, "updated_at", None) is None:
+        target.updated_at = now
+
+
+@sa_event.listens_for(ContactIdentifier, "before_insert")
+def _set_contact_identifier_defaults(mapper, connection, target):
+    if getattr(target, "created_at", None) is None:
+        target.created_at = datetime.now(timezone.utc)
+    if getattr(target, "normalization_failed", None) is None:
+        target.normalization_failed = False
 
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
