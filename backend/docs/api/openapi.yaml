@@ -579,10 +579,14 @@ paths:
       tags:
       - mobile-contacts
       summary: Import Contacts Endpoint
-      description: "Import a batch of device contacts, deduping against existing ones.\n\
-        \nSee ``app/services/dedup.py`` for the full matching rules (\xA715.2). This\n\
-        endpoint is a thin transactional wrapper around that service \u2014 all the\n\
-        create/update/flag decisions happen there."
+      description: 'Import a batch of device contacts, deduping against existing ones.
+
+
+        See ``app/services/dedup.py`` for the full matching rules (§15.2). This
+
+        endpoint is a thin transactional wrapper around that service — all the
+
+        create/update/flag decisions happen there.'
       operationId: import_contacts_endpoint_mobile_contacts_import_post
       requestBody:
         content:
@@ -1249,6 +1253,45 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Internal Server Error
+  /mobile/notifications/register-token:
+    post:
+      tags:
+      - mobile-notifications
+      summary: Register Push Token
+      operationId: register_push_token_mobile_notifications_register_token_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushTokenRegister'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushTokenOut'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
   /health:
     get:
       summary: Service health
@@ -1336,11 +1379,16 @@ components:
       required:
       - value
       title: ContactImportPhone
-      description: "One phone number for an incoming contact.\n\n``value`` is the\
-        \ E.164-normalized number when the client succeeded at\nnormalizing it, or\
-        \ the original raw string when it didn't (in which\ncase ``normalization_failed``\
-        \ must be true) \u2014 see\nMOBILE_APP_ARCHITECTURE_SPEC.md \xA715.1 step\
-        \ 4."
+      description: 'One phone number for an incoming contact.
+
+
+        ``value`` is the E.164-normalized number when the client succeeded at
+
+        normalizing it, or the original raw string when it didn''t (in which
+
+        case ``normalization_failed`` must be true) — see
+
+        MOBILE_APP_ARCHITECTURE_SPEC.md §15.1 step 4.'
     ContactImportRequest:
       properties:
         contacts:
@@ -1393,8 +1441,10 @@ components:
       - name
       - matched_contact_ids
       title: ContactImportReviewItem
-      description: "One incoming row that matched more than one existing contact and\
-        \ was\nnot auto-merged \u2014 see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.2."
+      description: 'One incoming row that matched more than one existing contact and
+        was
+
+        not auto-merged — see MOBILE_APP_ARCHITECTURE_SPEC.md §15.2.'
     ContactListResponse:
       properties:
         items:
@@ -1471,14 +1521,23 @@ components:
       - device_import
       - manual
       title: ContactSource
-      description: "Where a contact's data came from \u2014 affects how import merges\
-        \ treat it\n(see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.3): a ``manual`` contact's\n\
-        birthday is never silently overwritten by a later device re-import.\n\n``future_calendar_import``\
-        \ and ``extension_sync`` from the architecture\ndoc's enum are not included\
-        \ as values here yet \u2014 nothing in this\ncodebase can produce either of\
-        \ them, and an unused enum value is a\nspeculative API surface, not a harmless\
-        \ placeholder. Adding one is a\nsingle-line migration when the feature that\
-        \ produces it actually ships."
+      description: 'Where a contact''s data came from — affects how import merges
+        treat it
+
+        (see MOBILE_APP_ARCHITECTURE_SPEC.md §15.3): a ``manual`` contact''s
+
+        birthday is never silently overwritten by a later device re-import.
+
+
+        ``future_calendar_import`` and ``extension_sync`` from the architecture
+
+        doc''s enum are not included as values here yet — nothing in this
+
+        codebase can produce either of them, and an unused enum value is a
+
+        speculative API surface, not a harmless placeholder. Adding one is a
+
+        single-line migration when the feature that produces it actually ships.'
     ContactUpdate:
       properties:
         name:
@@ -1571,7 +1630,7 @@ components:
       - email
       - password
       title: LoginRequest
-      description: "Login credentials \u2014 email + plaintext password."
+      description: Login credentials — email + plaintext password.
     MessageResponse:
       properties:
         message:
@@ -1581,6 +1640,54 @@ components:
       required:
       - message
       title: MessageResponse
+    PushPlatform:
+      type: string
+      enum:
+      - ios
+      - android
+      title: PushPlatform
+    PushTokenOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        device_token:
+          type: string
+          title: Device Token
+        platform:
+          $ref: '#/components/schemas/PushPlatform'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        last_used_at:
+          type: string
+          format: date-time
+          title: Last Used At
+      type: object
+      required:
+      - id
+      - device_token
+      - platform
+      - created_at
+      - last_used_at
+      title: PushTokenOut
+    PushTokenRegister:
+      properties:
+        device_token:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Device Token
+          description: Opaque push token issued by APNs/FCM (or Expo) to this device.
+        platform:
+          $ref: '#/components/schemas/PushPlatform'
+      type: object
+      required:
+      - device_token
+      - platform
+      title: PushTokenRegister
     RefreshRequest:
       properties:
         refresh_token:
@@ -1602,14 +1709,14 @@ components:
           maxLength: 128
           minLength: 8
           title: Password
-          description: "8\u2013128 characters"
+          description: 8–128 characters
       type: object
       required:
       - email
       - password
       title: RegisterRequest
-      description: "Registration payload \u2014 email is validated as a proper address;\
-        \ password minimum 8 chars."
+      description: Registration payload — email is validated as a proper address;
+        password minimum 8 chars.
     ReminderBulkCreate:
       properties:
         contact_ids:
@@ -1636,10 +1743,14 @@ components:
       required:
       - contact_ids
       title: ReminderBulkCreate
-      description: "Apply one reminder definition to several selected contacts at\
-        \ once \u2014\nthe explicit feature request this milestone exists for. No\
-        \ persisted\nGroup entity: ``contact_ids`` is a plain multi-select, scoped\
-        \ to this\none call."
+      description: 'Apply one reminder definition to several selected contacts at
+        once —
+
+        the explicit feature request this milestone exists for. No persisted
+
+        Group entity: ``contact_ids`` is a plain multi-select, scoped to this
+
+        one call.'
     ReminderBulkCreateResponse:
       properties:
         created:
@@ -1877,3 +1988,5 @@ tags:
   description: Contact import (with dedup), listing, and management
 - name: mobile-reminders
   description: Reminder CRUD and multi-select bulk-apply to several contacts at once
+- name: mobile-notifications
+  description: Push-token device registration
