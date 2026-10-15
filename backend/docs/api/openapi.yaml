@@ -574,6 +574,313 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /mobile/contacts/import:
+    post:
+      tags:
+      - mobile-contacts
+      summary: Import Contacts Endpoint
+      description: "Import a batch of device contacts, deduping against existing ones.\n\
+        \nSee ``app/services/dedup.py`` for the full matching rules (\xA715.2). This\n\
+        endpoint is a thin transactional wrapper around that service \u2014 all the\n\
+        create/update/flag decisions happen there."
+      operationId: import_contacts_endpoint_mobile_contacts_import_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactImportRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactImportResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/contacts:
+    get:
+      tags:
+      - mobile-contacts
+      summary: List Contacts
+      operationId: list_contacts_mobile_contacts_get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+  /mobile/contacts/{contact_id}:
+    get:
+      tags:
+      - mobile-contacts
+      summary: Get Contact
+      operationId: get_contact_mobile_contacts__contact_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Contact Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    patch:
+      tags:
+      - mobile-contacts
+      summary: Update Contact
+      operationId: update_contact_mobile_contacts__contact_id__patch
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Contact Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    delete:
+      tags:
+      - mobile-contacts
+      summary: Delete Contact
+      operationId: delete_contact_mobile_contacts__contact_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Contact Id
+      responses:
+        '204':
+          description: Successful Response
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Forbidden
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Too Many Requests
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
   /health:
     get:
       summary: Service health
@@ -590,6 +897,258 @@ paths:
                 title: Response Health Check Health Get
 components:
   schemas:
+    ContactImportBirthday:
+      properties:
+        month:
+          type: integer
+          maximum: 12.0
+          minimum: 1.0
+          title: Month
+        day:
+          type: integer
+          maximum: 31.0
+          minimum: 1.0
+          title: Day
+        year:
+          anyOf:
+          - type: integer
+            maximum: 2100.0
+            minimum: 1900.0
+          - type: 'null'
+          title: Year
+      type: object
+      required:
+      - month
+      - day
+      title: ContactImportBirthday
+    ContactImportItem:
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          minLength: 1
+          title: Name
+        phones:
+          items:
+            $ref: '#/components/schemas/ContactImportPhone'
+          type: array
+          title: Phones
+        emails:
+          items:
+            type: string
+            maxLength: 320
+          type: array
+          title: Emails
+        birthday:
+          anyOf:
+          - $ref: '#/components/schemas/ContactImportBirthday'
+          - type: 'null'
+        device_contact_id:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+          title: Device Contact Id
+      type: object
+      required:
+      - name
+      title: ContactImportItem
+    ContactImportPhone:
+      properties:
+        value:
+          type: string
+          maxLength: 32
+          minLength: 1
+          title: Value
+        normalization_failed:
+          type: boolean
+          title: Normalization Failed
+          default: false
+      type: object
+      required:
+      - value
+      title: ContactImportPhone
+      description: "One phone number for an incoming contact.\n\n``value`` is the\
+        \ E.164-normalized number when the client succeeded at\nnormalizing it, or\
+        \ the original raw string when it didn't (in which\ncase ``normalization_failed``\
+        \ must be true) \u2014 see\nMOBILE_APP_ARCHITECTURE_SPEC.md \xA715.1 step\
+        \ 4."
+    ContactImportRequest:
+      properties:
+        contacts:
+          items:
+            $ref: '#/components/schemas/ContactImportItem'
+          type: array
+          maxItems: 2000
+          minItems: 1
+          title: Contacts
+      type: object
+      required:
+      - contacts
+      title: ContactImportRequest
+    ContactImportResponse:
+      properties:
+        imported:
+          type: integer
+          title: Imported
+        updated:
+          type: integer
+          title: Updated
+        requires_review:
+          items:
+            $ref: '#/components/schemas/ContactImportReviewItem'
+          type: array
+          title: Requires Review
+      type: object
+      required:
+      - imported
+      - updated
+      title: ContactImportResponse
+    ContactImportReviewItem:
+      properties:
+        name:
+          type: string
+          title: Name
+        device_contact_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Device Contact Id
+        matched_contact_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          title: Matched Contact Ids
+      type: object
+      required:
+      - name
+      - matched_contact_ids
+      title: ContactImportReviewItem
+      description: "One incoming row that matched more than one existing contact and\
+        \ was\nnot auto-merged \u2014 see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.2."
+    ContactListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ContactOut'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: ContactListResponse
+    ContactOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        name:
+          type: string
+          title: Name
+        birthday_month:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Birthday Month
+        birthday_day:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Birthday Day
+        birthday_year:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Birthday Year
+        source:
+          $ref: '#/components/schemas/ContactSource'
+        notes:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Notes
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - id
+      - name
+      - source
+      - created_at
+      - updated_at
+      title: ContactOut
+    ContactSource:
+      type: string
+      enum:
+      - device_import
+      - manual
+      title: ContactSource
+      description: "Where a contact's data came from \u2014 affects how import merges\
+        \ treat it\n(see MOBILE_APP_ARCHITECTURE_SPEC.md \xA715.3): a ``manual`` contact's\n\
+        birthday is never silently overwritten by a later device re-import.\n\n``future_calendar_import``\
+        \ and ``extension_sync`` from the architecture\ndoc's enum are not included\
+        \ as values here yet \u2014 nothing in this\ncodebase can produce either of\
+        \ them, and an unused enum value is a\nspeculative API surface, not a harmless\
+        \ placeholder. Adding one is a\nsingle-line migration when the feature that\
+        \ produces it actually ships."
+    ContactUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 255
+            minLength: 1
+          - type: 'null'
+          title: Name
+        birthday_month:
+          anyOf:
+          - type: integer
+            maximum: 12.0
+            minimum: 1.0
+          - type: 'null'
+          title: Birthday Month
+        birthday_day:
+          anyOf:
+          - type: integer
+            maximum: 31.0
+            minimum: 1.0
+          - type: 'null'
+          title: Birthday Day
+        birthday_year:
+          anyOf:
+          - type: integer
+            maximum: 2100.0
+            minimum: 1900.0
+          - type: 'null'
+          title: Birthday Year
+        notes:
+          anyOf:
+          - type: string
+            maxLength: 10000
+          - type: 'null'
+          title: Notes
+      type: object
+      title: ContactUpdate
     ErrorResponse:
       properties:
         detail:
@@ -644,7 +1203,7 @@ components:
       - email
       - password
       title: LoginRequest
-      description: Login credentials — email + plaintext password.
+      description: "Login credentials \u2014 email + plaintext password."
     MessageResponse:
       properties:
         message:
@@ -675,14 +1234,14 @@ components:
           maxLength: 128
           minLength: 8
           title: Password
-          description: 8–128 characters
+          description: "8\u2013128 characters"
       type: object
       required:
       - email
       - password
       title: RegisterRequest
-      description: Registration payload — email is validated as a proper address;
-        password minimum 8 chars.
+      description: "Registration payload \u2014 email is validated as a proper address;\
+        \ password minimum 8 chars."
     RequestEmailVerificationRequest:
       properties:
         email:
@@ -791,6 +1350,5 @@ components:
 tags:
 - name: mobile-auth
   description: Authentication, registration, email verification, and password reset
-servers:
-- url: http://localhost:8001
-  description: Local dev (docker-compose)
+- name: mobile-contacts
+  description: Contact import (with dedup), listing, and management
