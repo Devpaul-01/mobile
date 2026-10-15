@@ -1292,6 +1292,242 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
       - OAuth2PasswordBearer: []
+  /mobile/approvals:
+    get:
+      tags:
+      - mobile-approvals
+      summary: List Approvals
+      operationId: list_approvals_mobile_approvals_get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/ApprovalState'
+          - type: 'null'
+          title: State
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalListResponse'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Conflict
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+  /mobile/approvals/{approval_id}/approve:
+    post:
+      tags:
+      - mobile-approvals
+      summary: Approve Approval
+      operationId: approve_approval_mobile_approvals__approval_id__approve_post
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Conflict
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+  /mobile/approvals/{approval_id}/report-opened:
+    post:
+      tags:
+      - mobile-approvals
+      summary: Report Opened Endpoint
+      operationId: report_opened_endpoint_mobile_approvals__approval_id__report_opened_post
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportOpenedRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Conflict
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+  /mobile/approvals/{approval_id}/dismiss:
+    post:
+      tags:
+      - mobile-approvals
+      summary: Dismiss Approval
+      operationId: dismiss_approval_mobile_approvals__approval_id__dismiss_post
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Conflict
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
   /health:
     get:
       summary: Service health
@@ -1308,6 +1544,109 @@ paths:
                 title: Response Health Check Health Get
 components:
   schemas:
+    ApprovalChannel:
+      type: string
+      enum:
+      - whatsapp
+      title: ApprovalChannel
+      description: 'Only ``whatsapp`` exists today — this is a separate enum (rather
+
+        than reusing ``ReminderChannel``) because a ``PendingApproval`` only
+
+        ever exists *for* the whatsapp channel (§17); push/email never create
+
+        one. Kept as its own enum rather than a hardcoded string so a second
+
+        approval-gated channel, if one is ever added, doesn''t need a schema
+
+        migration just to widen a string column''s implied meaning.'
+    ApprovalListResponse:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ApprovalOut'
+          type: array
+          title: Items
+        total:
+          type: integer
+          title: Total
+        limit:
+          type: integer
+          title: Limit
+        offset:
+          type: integer
+          title: Offset
+      type: object
+      required:
+      - items
+      - total
+      - limit
+      - offset
+      title: ApprovalListResponse
+    ApprovalOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        reminder_occurrence_id:
+          type: string
+          format: uuid
+          title: Reminder Occurrence Id
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+        channel:
+          $ref: '#/components/schemas/ApprovalChannel'
+        state:
+          $ref: '#/components/schemas/ApprovalState'
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+      - id
+      - reminder_occurrence_id
+      - contact_id
+      - channel
+      - state
+      - created_at
+      - updated_at
+      - expires_at
+      title: ApprovalOut
+    ApprovalState:
+      type: string
+      enum:
+      - pending_approval
+      - approved
+      - completed
+      - link_failed
+      - expired
+      - dismissed
+      title: ApprovalState
+      description: 'States for the WhatsApp pending-approval state machine
+
+        (MOBILE_APP_ARCHITECTURE_SPEC.md §17.1). WhatsApp can never be
+
+        auto-sent, so the backend''s job stops at handing the user a
+
+        pre-filled deep link — these states track how far that handoff got,
+
+        not whether the message was actually delivered inside WhatsApp
+
+        (unobservable from here; see ``COMPLETED``''s docstring note on the
+
+        approval service).'
     ContactImportBirthday:
       properties:
         month:
@@ -1876,6 +2215,15 @@ components:
           title: Enabled
       type: object
       title: ReminderUpdate
+    ReportOpenedRequest:
+      properties:
+        success:
+          type: boolean
+          title: Success
+      type: object
+      required:
+      - success
+      title: ReportOpenedRequest
     RequestEmailVerificationRequest:
       properties:
         email:
@@ -1990,3 +2338,5 @@ tags:
   description: Reminder CRUD and multi-select bulk-apply to several contacts at once
 - name: mobile-notifications
   description: Push-token device registration
+- name: mobile-approvals
+  description: WhatsApp pending-approval queue (approve/report-opened/dismiss)
