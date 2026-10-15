@@ -10,13 +10,19 @@ the full scheduler/occurrence/push/email/approval machinery.
 Milestone 4 added ReminderOccurrence (the scheduler's idempotency anchor,
 §16.1) and PushToken (device push-token registration, §12.2) — i.e. Phase
 6 plus a minimal Phase 7 slice.
-Milestone 5 (this revision) adds PendingApproval / ApprovalHistory — the
-WhatsApp pending-approval state machine, §17, Phase 9. This is the one
-remaining channel from Milestone 4's scheduler that previously only
-logged a warning and did nothing; it's now wired to the real state
-machine. Subscriptions/payments are still deferred to later milestones —
-not stubbed here, since an empty table nobody writes to yet is dead
-weight, not scaffolding.
+Milestone 5 added PendingApproval / ApprovalHistory — the WhatsApp
+pending-approval state machine, §17, Phase 9. This is the one remaining
+channel from Milestone 4's scheduler that previously only logged a
+warning and did nothing; it's now wired to the real state machine.
+Milestone 6 (this revision) adds ContactPhoto — object storage metadata,
+§26, Phase 11. One optional photo per contact (enforced via a unique
+constraint on ``contact_id``, matching §26's explicit MVP scope note),
+backed by Cloudflare R2 rather than AWS S3 per an explicit team decision
+(R2's API is S3-compatible, so this needed no deviation from §26's
+design — only the client's ``endpoint_url`` differs; see
+app/services/storage.py). Subscriptions/payments are still deferred to
+later milestones — not stubbed here, since an empty table nobody writes
+to yet is dead weight, not scaffolding.
 
 Patterns copied from bm-ts/backend/app/db/models.py: UUID primary keys,
 ``server_default=now()`` timestamps, ``ondelete="CASCADE"`` FKs so account
@@ -689,3 +695,40 @@ class ApprovalHistory(Base):
     )
 
     __table_args__ = (Index("idx_approval_history_approval_id", "approval_id"),)
+
+
+class ContactPhoto(Base):
+    """Metadata for one contact's uploaded photo (§26) — the actual image
+    bytes live in Cloudflare R2 (an S3-compatible object store), never in
+    this database; this row only ever points at an object by its key.
+
+    Enforces "one optional photo per contact" (§26's explicit MVP scope
+    note — no photo *library*/multiple-images-per-contact) via the unique
+    constraint on ``contact_id``: uploading a new photo for a contact that
+    already has one replaces it (see app/services/storage.py), rather
+    than this table ever holding two rows for the same contact.
+
+    Not soft-deleted: a photo is either present or it isn't, there's no
+    history value in keeping a row around after its object is deleted.
+    """
+
+    __tablename__ = "contact_photos"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    contact_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("contacts.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    object_key: Mapped[str] = mapped_column(String(512), nullable=False, unique=True)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("contact_id", name="uq_contact_photo_contact_id"),
+    )

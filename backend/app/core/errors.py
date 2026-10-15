@@ -43,6 +43,12 @@ class ErrorCodes:
     APPROVAL_NOT_FOUND = "approval_not_found"
     INVALID_APPROVAL_TRANSITION = "invalid_approval_transition"
 
+    # Object storage / contact photos (§26)
+    INVALID_CONTENT_TYPE = "invalid_content_type"
+    CONTACT_PHOTO_NOT_FOUND = "contact_photo_not_found"
+    UPLOAD_NOT_FOUND = "upload_not_found"
+    STORAGE_NOT_CONFIGURED = "storage_not_configured"
+
     # System
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     VALIDATION_ERROR = "validation_error"
