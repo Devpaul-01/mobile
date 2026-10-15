@@ -39,6 +39,10 @@ class ErrorCodes:
     # Reminders
     REMINDER_NOT_FOUND = "reminder_not_found"
 
+    # Approvals (WhatsApp pending-approval state machine, §17)
+    APPROVAL_NOT_FOUND = "approval_not_found"
+    INVALID_APPROVAL_TRANSITION = "invalid_approval_transition"
+
     # System
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     VALIDATION_ERROR = "validation_error"
