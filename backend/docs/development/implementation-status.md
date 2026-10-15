@@ -290,3 +290,120 @@ yet.**
 2. Decide whether the scheduler/delivery phase is next, or whether
    something else (payments, object storage, the mobile client itself) is
    a higher priority before reminders actually fire.
+
+## Session 4 — 2026-10-12 (branch `feat/reminder-scheduler`, off `feat/reminders`)
+
+### What shipped
+- **The reminder scheduler is real now** — Phases 6-7 of the architecture
+  doc (`app/services/scheduler.py`). An in-process APScheduler job
+  (`AsyncIOScheduler`, 15-minute interval, `max_instances=1`,
+  `coalesce=True` — §13.3's "no separate worker needed for one periodic
+  job" call) checks every enabled `Reminder` and fires the ones whose
+  trigger moment has landed in the trailing 15-minute window.
+- **Trigger-time calculation** checks 3 candidate years
+  (`today.year - 1/0/+1`) per reminder per pass, not just the current
+  year — needed because `lead_time_days` (0-365) can push the trigger
+  moment into an adjacent calendar year (e.g. a Jan 2 birthday with a
+  5-day lead fires in *December of the prior year*). Fixed local send
+  time of 9:00 AM in the user's own `timezone` (defaulting to UTC),
+  converted to UTC for the comparison. Feb 29 falls back to Feb 28 on a
+  non-leap candidate year.
+- **`ReminderOccurrence`** (new table) is the idempotency anchor per §16.1
+  — one row per `(reminder_id, occurrence_year)`, enforced by a unique
+  constraint the scheduler relies on as the actual correctness guarantee
+  (not a pre-check `SELECT`, which would race under concurrent runs). The
+  insert is wrapped in a SAVEPOINT (`db.begin_nested()`), not a plain
+  `db.rollback()` — a bug caught before it shipped: a full rollback on a
+  duplicate-occurrence conflict would have destroyed every *other*
+  occurrence already created earlier in the same evaluation pass, before
+  the caller gets to commit.
+- **Distributed lock, now implemented** — the team's earlier decision
+  ("implement distributed lock mechanism for apscheduler," Session 2/3)
+  was logged as deferred specifically because no scheduler existed yet;
+  that precondition is gone now that this branch adds one. Implemented as
+  a Postgres session-level advisory lock
+  (`pg_try_advisory_lock`/`pg_advisory_unlock`, fixed key) around each
+  scheduler cycle, deliberately choosing Postgres over Redis to avoid
+  coupling this branch to the not-yet-merged `feat/redis-infra` branch. A
+  non-Postgres bind (SQLite, in tests) always succeeds — there's no
+  multi-instance concern to guard against there.
+- **Email delivery + retry bookkeeping** (§16.3): `EmailStatus`
+  (pending/sent/failed/failed_permanent) and `email_attempts` tracked on
+  `ReminderOccurrence`. A failed send is retried on later scheduler passes
+  (`retry_failed_emails`), up to 3 total attempts, then marked
+  `failed_permanent`.
+- **Push delivery**: fire-and-forget per §16.3 — no retry, no status
+  tracking on the occurrence at all (unlike email). Sent to every
+  `PushToken` row registered for the user.
+- **Both `services/email.py` and `services/push.py` are stubs** — they
+  log instead of calling a real provider (SendGrid / APNs-FCM), mirroring
+  the existing `services/auth_tokens.py._deliver` pattern from Milestone
+  1. Swapping in real providers later is isolated to these two files.
+- **`whatsapp` channel: explicitly not implemented.** The architecture
+  doc's WhatsApp design needs a `PendingApproval`/approval-history state
+  machine (Phase 9) that doesn't exist in this codebase. A reminder with
+  `whatsapp` in its channels still gets its `ReminderOccurrence` created
+  (so the yearly-fire bookkeeping stays correct once Phase 9 lands), but
+  nothing is sent, queued, or logged as a real attempt — flagged loudly in
+  code and in the frontend doc rather than silently dropped. Deferred to
+  its own future branch, per the standing instruction not to build the
+  entire backend in one pass.
+- **`PushToken`** (new table, minimal slice of Phase 7): upsert on
+  `(user_id, device_token)` per §12.2/§35 via a new endpoint —
+  `POST /mobile/notifications/register-token`
+  (`app/api/routers/notifications.py`). No status/retry tracking, since
+  push failures are never retried.
+- **`app/main.py`**: added a `lifespan` context manager that calls
+  `init_scheduler()` on startup (guarded by `settings.scheduler_enabled`,
+  a new config flag) and shuts the scheduler down on app shutdown.
+  `conftest.py` forces `SCHEDULER_ENABLED=false` for the whole test suite
+  so pytest never starts a real background job against the per-test
+  SQLite engine.
+- Migration `0004_reminder_occurrences_and_push_tokens` — both tables,
+  verified in both directions (`upgrade head`, `downgrade -1`,
+  `downgrade base`) against local Postgres 16.
+- 18 new tests (14 in `app/tests/test_scheduler.py` covering trigger-time
+  correctness, timezone offset, the year-wraparound edge case, the Feb-29
+  fallback, idempotency across repeated runs, disabled/soft-deleted
+  skipping, push/email/whatsapp downstream actions, and email retry
+  progression including the permanent-failure path; 4 in
+  `app/tests/test_notifications.py` covering auth, create, upsert, and
+  invalid-platform validation). 57 tests total on this branch (39 from
+  Milestones 1-3 + 18 new).
+- OpenAPI regenerated; new frontend doc:
+  `docs/frontend-integration/milestone-4-scheduler.md`.
+
+### Tests
+- `pytest`: 57 passed, 0 failed
+- `ruff check app/ alembic/`: clean
+- `mypy app/`: clean
+- `alembic upgrade head`, `downgrade -1`, `downgrade base` for `0004`:
+  verified against local Postgres 16
+
+### Branches / commits
+- Branch: `feat/reminder-scheduler` (off `feat/reminders` — needs the
+  `Reminder` model)
+
+### Ready for frontend
+Everything in `docs/frontend-integration/milestone-4-scheduler.md` — the
+new push-token registration endpoint, plus the fact that `push` and
+`email` reminders now actually run on a schedule (sending is still
+stubbed/logged, not a real provider call yet — see that doc's §C).
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions —
+   unchanged, not re-raised in detail each time.
+2. Real push/email provider integration (APNs/FCM or Expo; SendGrid) —
+   both are stubs today.
+3. The WhatsApp pending-approval state machine (architecture doc Phase 9)
+   — the next major deferred unit, scoped as its own future branch.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — five open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`, `feat/reminder-scheduler`), none
+   merged to `main`.
+2. Scope and build the WhatsApp pending-approval state machine (Phase 9)
+   as its own branch.
+3. Wire up real push/email providers when ready to actually notify real
+   devices/inboxes.
