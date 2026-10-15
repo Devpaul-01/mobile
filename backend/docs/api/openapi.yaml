@@ -1528,6 +1528,209 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Internal Server Error
+  /mobile/uploads/presign:
+    post:
+      tags:
+      - mobile-uploads
+      summary: Presign Upload
+      operationId: presign_upload_mobile_uploads_presign_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadPresignRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadPresignResponse'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/uploads/confirm:
+    post:
+      tags:
+      - mobile-uploads
+      summary: Confirm Upload
+      operationId: confirm_upload_mobile_uploads_confirm_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadConfirmRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPhotoOut'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
+  /mobile/uploads/contact-photo/{contact_id}:
+    get:
+      tags:
+      - mobile-uploads
+      summary: Get Contact Photo
+      operationId: get_contact_photo_mobile_uploads_contact_photo__contact_id__get
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Contact Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactPhotoOut'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
+    delete:
+      tags:
+      - mobile-uploads
+      summary: Delete Contact Photo
+      operationId: delete_contact_photo_mobile_uploads_contact_photo__contact_id__delete
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: contact_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Contact Id
+      responses:
+        '204':
+          description: Successful Response
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Bad Request
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
   /health:
     get:
       summary: Service health
@@ -1854,6 +2057,38 @@ components:
       - created_at
       - updated_at
       title: ContactOut
+    ContactPhotoOut:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+        content_type:
+          type: string
+          title: Content Type
+        size_bytes:
+          type: integer
+          title: Size Bytes
+        uploaded_at:
+          type: string
+          format: date-time
+          title: Uploaded At
+        view_url:
+          type: string
+          title: View Url
+      type: object
+      required:
+      - id
+      - contact_id
+      - content_type
+      - size_bytes
+      - uploaded_at
+      - view_url
+      title: ContactPhotoOut
     ContactSource:
       type: string
       enum:
@@ -2277,6 +2512,57 @@ components:
       - refresh_token
       title: TokenResponse
       description: JWT token pair returned on successful login or refresh.
+    UploadConfirmRequest:
+      properties:
+        object_key:
+          type: string
+          title: Object Key
+        contact_id:
+          type: string
+          format: uuid
+          title: Contact Id
+      type: object
+      required:
+      - object_key
+      - contact_id
+      title: UploadConfirmRequest
+    UploadPresignRequest:
+      properties:
+        content_type:
+          type: string
+          title: Content Type
+        purpose:
+          type: string
+          title: Purpose
+          default: contact_photo
+      type: object
+      required:
+      - content_type
+      title: UploadPresignRequest
+    UploadPresignResponse:
+      properties:
+        upload_url:
+          type: string
+          title: Upload Url
+        fields:
+          additionalProperties:
+            type: string
+          type: object
+          title: Fields
+        object_key:
+          type: string
+          title: Object Key
+        expires_at:
+          type: string
+          format: date-time
+          title: Expires At
+      type: object
+      required:
+      - upload_url
+      - fields
+      - object_key
+      - expires_at
+      title: UploadPresignResponse
     UserProfile:
       properties:
         id:
@@ -2340,3 +2626,5 @@ tags:
   description: Push-token device registration
 - name: mobile-approvals
   description: WhatsApp pending-approval queue (approve/report-opened/dismiss)
+- name: mobile-uploads
+  description: Contact photo upload (presigned Cloudflare R2 upload + confirm)
