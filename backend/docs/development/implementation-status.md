@@ -407,3 +407,110 @@ stubbed/logged, not a real provider call yet — see that doc's §C).
    as its own branch.
 3. Wire up real push/email providers when ready to actually notify real
    devices/inboxes.
+
+## Session 5 — 2026-10-13 (branch `feat/whatsapp-approvals`, off `feat/reminder-scheduler`)
+
+### What shipped
+- **The WhatsApp pending-approval state machine is built** — architecture
+  doc §17, Phase 9. This was the one remaining channel the scheduler
+  (Milestone 4) only logged a warning for; it's now wired to a real state
+  machine, matching the product constraint that WhatsApp can never be
+  auto-sent.
+- **New tables**: `PendingApproval` (one row per WhatsApp send awaiting
+  the user's manual tap, unique on `reminder_occurrence_id` as
+  belt-and-suspenders alongside the occurrence table's own uniqueness —
+  §17.3) and `ApprovalHistory` (append-only audit trail of every state
+  transition, §17.4 — `from_state` nullable only for the creation row).
+- **Every transition in §17.1's diagram, implemented exactly**
+  (`app/services/approvals.py`):
+  `PENDING_APPROVAL → APPROVED` (user taps "Send via WhatsApp", recorded
+  *before* the client opens the deep link so it survives a user backing
+  out), `APPROVED → COMPLETED`/`LINK_FAILED` (client reports whether
+  `Linking.openURL` resolved), `PENDING_APPROVAL → EXPIRED` (scheduler
+  sweep, 7-day window, row kept not deleted), `PENDING_APPROVAL →
+  DISMISSED` (explicit user action, distinguished from EXPIRED for
+  analytics). Every transition writes an `ApprovalHistory` row through a
+  single `_transition` helper — the only place `state` is ever written —
+  so no transition can happen unlogged.
+- **The one deliberate exception to "invalid transition = 409," per §17.2
+  and the architecture doc's own §43 handoff note**: a `report-opened`
+  call that arrives after the approval already reached `COMPLETED`/
+  `LINK_FAILED` (a client retry after a slow response) is a benign
+  no-op, not a 409 — implemented exactly as flagged in the spec as a
+  deliberate exception to the general rule.
+- **Endpoints** (`app/api/routers/approvals.py`, `/mobile/approvals`):
+  `GET /` (paginated, optional `state` filter), `POST /{id}/approve`,
+  `POST /{id}/report-opened`, `POST /{id}/dismiss`. No create endpoint —
+  a `PendingApproval` only ever comes from the scheduler firing a
+  whatsapp-channel reminder, never a direct API call.
+- **Scheduler wiring** (`app/services/scheduler.py`): the `whatsapp`
+  branch of `_trigger_downstream_actions` now calls
+  `create_pending_approval` instead of only logging, and also sends a
+  push notification pointing at the Approval Queue (§17.2 — "also
+  triggers a push notification," regardless of whether `push` is itself
+  one of the reminder's own channels) via a new
+  `send_approval_queue_push` stub in `services/push.py`, kept distinct
+  from the existing birthday-reminder push so the two notification types
+  don't get conflated in logs/analytics later. `run_scheduler_cycle` now
+  also runs `expire_stale_approvals` every cycle, alongside occurrence
+  evaluation and email retry.
+- Migration `0005_pending_approvals_and_approval_history` — both tables,
+  verified in both directions (`upgrade head`, `downgrade -1`,
+  `downgrade base`) against local Postgres 16.
+- 20 new tests: 19 in `app/tests/test_approvals.py` (every transition in
+  §17.1's diagram including the report-opened idempotency exception, the
+  409 cases, the expiry sweep's three branches (expires stale items,
+  ignores not-yet-due items, ignores already-settled items), and the
+  full HTTP layer — auth, 404 on not-owned, end-to-end approve →
+  report-opened flow, dismiss, state filtering), plus 1 new test in
+  `app/tests/test_scheduler.py` confirming the scheduler sends the
+  approval-queue push (an existing scheduler test was also updated,
+  not just renamed, to assert a real `PendingApproval` row is created,
+  not only an occurrence). 77 tests total on this branch (57 from
+  Milestones 1-4 + 20 new).
+- OpenAPI regenerated; new frontend doc:
+  `docs/frontend-integration/milestone-5-whatsapp-approvals.md`, which
+  also explicitly corrects the Milestone 4 doc's now-outdated "whatsapp:
+  nothing happens" note.
+
+### Tests
+- `pytest`: 77 passed, 0 failed
+- `ruff check app/ alembic/`: clean
+- `mypy app/`: clean
+- `alembic upgrade head`, `downgrade -1`, `downgrade base` for `0005`:
+  verified against local Postgres 16
+
+### Branches / commits
+- Branch: `feat/whatsapp-approvals` (off `feat/reminder-scheduler` —
+  needs `ReminderOccurrence`)
+
+### Ready for frontend
+Everything in `docs/frontend-integration/milestone-5-whatsapp-approvals.md`
+— the approval queue list + approve/report-opened/dismiss actions, plus
+the precise, important distinction between `COMPLETED` ("we handed off to
+WhatsApp") and actual message delivery (unobservable, never claimed).
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions —
+   unchanged, not re-raised in detail each time.
+2. Real push/email provider integration — still stubs, unchanged from
+   Session 4.
+3. No "undo" for a dismissed/expired approval, by design (§17 doesn't
+   call for one) — flagged in the frontend doc, not a gap to close here.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — six open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`, `feat/reminder-scheduler`,
+   `feat/whatsapp-approvals`), none merged to `main`. Note:
+   `feat/redis-infra` is still a sibling branch off `backend-foundation`
+   only — it was never folded into the reminders/scheduler/approvals
+   line, by deliberate choice (see Session 2/3 notes), so it needs its
+   own separate merge.
+2. With auth, contacts, reminders, scheduler, and WhatsApp approvals all
+   in place, the backend now covers the core "remember and reach out"
+   loop end-to-end (push/email still log-only, WhatsApp hands off to a
+   real deep link). Remaining architecture-doc phases not yet started:
+   PayPal payments (§23/§24), S3 object storage (§26, noting the team's
+   earlier Cloudflare-instead-of-AWS decision), GDPR export/account
+   deletion (§27).
