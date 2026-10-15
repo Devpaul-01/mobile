@@ -752,3 +752,124 @@ status, plus the important "this isn't recurring billing yet" framing.
    object-storage orphan-cleanup and cascade-delete gaps noted in Session
    6 get closed, and where PayPal subscription cancellation on account
    deletion (§27.2 step 1) gets wired up.
+
+## Session 8 — 2026-10-14 (branch `feat/account-deletion`, off `feat/paypal-payments`)
+
+### What shipped
+- **GDPR export + account deletion built** — architecture doc §27, Phase
+  13, the last phase in §41's implementation order. Its own prerequisite
+  ("all prior phases") is satisfied by Sessions 1-7, modulo the still-
+  separate `feat/redis-infra` sibling branch.
+- **`GET /mobile/account/export`**: one JSON document covering every
+  owned entity type (§27.1's framing, applied literally) — profile,
+  contacts + their identifiers + their photo metadata, reminders + full
+  occurrence history, approvals + full state-transition history,
+  subscription + payment summary. Contact photos aren't named in §27.4's
+  minimal explicit list but are included anyway, consistent with §27.1's
+  broader "every owned entity type" framing.
+- **"Not raw PayPal data" (§27.4) honored literally**: the payment/
+  subscription summary omits `provider_order_id`/`provider_subscription_id`
+  — PayPal-internal identifiers, not data about the user.
+- **`DELETE /mobile/account`**: requires re-entering the current password
+  (§27.2's "requires re-authentication confirmation") — wrong password is
+  a `401 wrong_password`, not a silent no-op or a generic 400.
+- **Deletion workflow is §27.2's ordered steps, with one flagged,
+  reasoned deviation**: step 1 ("cancel any active PayPal subscription")
+  is a **genuine no-op** under this project's payment model, not a
+  partial implementation. Session 7 built PayPal on the Orders API
+  (one-time capture, no recurring agreement) rather than the
+  Subscriptions API — there is no external PayPal call "cancel" could
+  even mean here, and the local `Subscription` row is deleted by the FK
+  cascade in the very same transaction regardless of what status it
+  holds first, so nothing would ever observe an intermediate
+  "cancelled-then-deleted" state. This is called out explicitly in the
+  service module's docstring rather than left as a silently-incomplete
+  step — a genuinely different conclusion from "flip the status anyway
+  for show," which would have been dead code.
+- **Step 2 (revoke push tokens) and step 4 (cascade delete) both reduce
+  to the FK cascade already built across every prior milestone** — no
+  new cascade wiring needed; this milestone is largely a receipt that
+  the cascade convention held up, confirmed by directly re-querying
+  every affected table after a test deletion.
+- **Step 3 (object storage cleanup)** is a new `storage.
+  delete_objects_by_prefix()` function — a prefix-based bulk delete
+  (`list_objects_v2` + `delete_objects`, paginated) rather than deleting
+  each `ContactPhoto`'s object individually, made possible because object
+  keys are already scoped `{user_id}/contacts/{uuid}.{ext}` (Session 6's
+  key-naming decision, made exactly so a later bulk-delete-on-deletion
+  step would be a simple prefix match). Deliberately runs synchronously,
+  not via a task queue — consistent with this codebase's §13.3 decision
+  to not introduce one. Deliberately **not** fail-open the way the rest
+  of storage.py is fail-loud: it quietly no-ops only when storage isn't
+  *configured at all* (so a deployment without object storage can still
+  delete accounts), but a *configured* store that actually errors is
+  allowed to abort the whole deletion rather than silently losing track
+  of undeleted objects.
+- 11 new tests (`app/tests/test_account.py`) — export's full-entity-type
+  coverage (including the omitted-PayPal-identifiers assertion), wrong-
+  password rejection, a real end-to-end cascade-delete test that re-
+  queries every affected table afterward to confirm rows are actually
+  gone (not just that the endpoint returned 200), storage prefix-delete
+  correctness (this user's object removed, an unrelated user's object
+  left untouched), and deletion succeeding even with object storage
+  completely unconfigured. 111 tests total on this branch (104 from
+  Milestones 1-7 + 7 new).
+- OpenAPI regenerated (30 paths, up from 28, including the 2 new
+  `/mobile/account/*` endpoints); new frontend doc:
+  `docs/frontend-integration/milestone-8-account-export-deletion.md`,
+  which leads with the "subscription cancellation is a no-op here"
+  point since it's the one thing most likely to confuse whoever reads
+  §27.2 literally and goes looking for a PayPal-cancel call to wire up.
+- No new migration — this milestone adds no new tables, only new
+  endpoints and queries against the existing schema.
+- Also caught and fixed, in a separate small commit on this branch and
+  retroactively on `feat/paypal-payments` directly: Session 7's status-
+  doc entry had an arithmetic error (claimed "104 from Milestones 1-6 +
+  15 new = 119"; actual is 89 + 15 = 104, confirmed by rerunning pytest).
+  Self-caught while re-verifying the running total for this entry, not
+  reported by the user.
+
+### Tests
+- `pytest`: 111 passed, 0 failed (104 carried forward + 7 new)
+- `ruff check app/ alembic/`: clean
+- `mypy app/`: clean (47 source files)
+- No migration to verify this session (no schema change)
+
+### Branches / commits
+- Branch: `feat/account-deletion` (off `feat/paypal-payments`)
+
+### Ready for frontend
+Everything in
+`docs/frontend-integration/milestone-8-account-export-deletion.md` —
+export-as-download, delete-with-password-confirmation, and the
+subscription-cancellation-is-a-no-op note.
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions
+   — unchanged; no new secrets this milestone.
+2. **No automated Sentry event deletion, no backup-aging guarantee** —
+   both explicitly out of this flow's reach per §27.3, disclosed in the
+   frontend doc rather than silently assumed handled.
+3. **No rate limiting on `DELETE /mobile/account`** — a wrong-password
+   retry loop isn't throttled. Low risk (needs a valid access token
+   already) but, consistent with every other "needs Phase 10's Redis-
+   backed per-user limiter" gap noted in Sessions 6-7, flagged rather
+   than silently skipped.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — nine open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`, `feat/reminder-scheduler`,
+   `feat/whatsapp-approvals`, `feat/object-storage`,
+   `feat/paypal-payments`, `feat/account-deletion`), none merged to
+   `main`. `feat/redis-infra` is still the one sibling never folded into
+   this line.
+2. **Every phase in the architecture doc's §41 implementation order has
+   now been built** (modulo the separate Redis sibling branch and the
+   per-user-rate-limiting gaps that depend on it, noted across Sessions
+   6-8). The natural next step is reviewing/merging the branch chain
+   rather than starting new feature work — or, if there's appetite for
+   it, finally folding `feat/redis-infra` into this line so the Phase-10
+   per-user rate-limiting gaps (contact import, reminder create, PayPal
+   create-order, this session's account deletion) can all be closed in
+   one pass.
