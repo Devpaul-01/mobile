@@ -210,3 +210,83 @@ or push notifications.
    per-user-account, how the APScheduler distributed-lock decision above
    factors in before that scheduler code is written) before implementation
    starts, to avoid building the wrong shape twice.
+
+## Session 3 — 2026-10-12 (branch `feat/reminders`, off `feat/contacts-import-dedup`)
+
+### Scope answer received
+Asked above whether "apply a reminder to a group of contacts" meant a
+persisted Group entity or a one-time multi-select — answer: **multi-select,
+no Group entity.** Built accordingly.
+
+### Completed
+- `Reminder` model + migration `0003_reminders` (verified both directions
+  against real Postgres). One contact can have more than one reminder row
+  (e.g. separate "3 days before" and "on the day" reminders) — no
+  uniqueness constraint added, matching the architecture doc's §36
+  one-to-many relationship rather than inventing a restriction it doesn't
+  specify.
+- `channels` stored as a JSON list of strings (`push`/`email`/`whatsapp`),
+  not the architecture doc's suggested array/bitmask column — portable
+  across Postgres and the SQLite test DB, no bit-arithmetic needed for 3
+  possible values. Flagged as a deliberate implementation choice, not an
+  oversight.
+- Endpoints (`app/api/routers/reminders.py`, `/mobile/reminders`):
+  `POST /` (single contact), **`POST /bulk`** (the explicit ask — apply one
+  reminder definition to a multi-selected list of contact IDs, 1–500 per
+  call; a contact not owned/not found is skipped and reported in
+  `skipped_contact_ids`, not a whole-call failure), `GET /` (paginated,
+  optional `contact_id` filter), `GET /{id}`, `PATCH /{id}`, `DELETE /{id}`
+  (hard delete — reminders aren't soft-deleted, unlike contacts; see the
+  model docstring for why).
+- **Explicitly not built in this milestone** (see
+  `docs/frontend-integration/milestone-3-reminders.md` §A for the
+  frontend-facing version of this caveat): the scheduler, `ReminderOccurrence`,
+  push/email/WhatsApp delivery, and the pending-approval state machine
+  (architecture doc Phases 6-9). A `Reminder` row today is a stored
+  preference that nothing acts on yet — creating one does not send
+  anything. Kept out deliberately, per the standing instruction not to
+  build the entire backend in one pass; this is flagged loudly here and in
+  the frontend doc so it's never mistaken for "reminders work end-to-end."
+- 8 new tests (`app/tests/test_reminders.py`): auth-required, 404 on a
+  contact not owned, 422 on an invalid channel, full CRUD round trip, bulk
+  apply creating one reminder per selected contact, bulk apply skipping
+  (not failing on) a contact the caller doesn't own, and empty-list/auth
+  validation on the bulk endpoint. 39 tests total on this branch (31 from
+  Milestones 1-2 + 8 new).
+- OpenAPI regenerated; new frontend doc:
+  `docs/frontend-integration/milestone-3-reminders.md`.
+
+### Tests
+- `pytest`: 39 passed, 0 failed
+- `ruff check app/`: clean
+- `mypy app/`: clean
+- `alembic upgrade head` + `downgrade base` for `0003`: verified against
+  local Postgres 16
+
+### Branches / commits
+- Branch: `feat/reminders` (off `feat/contacts-import-dedup` — needs the
+  `Contact` model, so it can't be independent of that branch the way
+  `feat/redis-infra` is)
+
+### Ready for frontend
+Everything in `docs/frontend-integration/milestone-3-reminders.md` —
+create, bulk-apply, list, get, edit, delete. Reiterating because it's
+easy to miss: **no notification is ever sent as a result of these calls
+yet.**
+
+### Known blockers / unfinished
+1. Same deploy-secrets and public-repo-security items as prior sessions —
+   unchanged, not re-raised in detail each time.
+2. Scheduler/delivery (Phases 6-9) is the natural next piece of work once
+   the user wants reminders to actually do something, and is a
+   substantially larger unit (APScheduler job, timezone-aware trigger
+   calculation, `ReminderOccurrence` idempotency, push/email/WhatsApp
+   services, the pending-approval state machine) — not started.
+
+### Recommended next steps
+1. Merge/review whenever the user is ready — three open branches now
+   (`feat/backend-foundation`, `feat/contacts-import-dedup`,
+   `feat/redis-infra`, `feat/reminders`), none merged to `main`.
+2. Decide whether the scheduler/delivery phase is next, or whether
+   something else (payments, object storage, the mobile client itself) is
+   a higher priority before reminders actually fire.
