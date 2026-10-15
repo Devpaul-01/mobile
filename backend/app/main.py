@@ -18,7 +18,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routers import auth, contacts
+from app.api.routers import auth, contacts, reminders
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCodes
 from app.core.rate_limiter import init_rate_limiter
@@ -48,6 +48,10 @@ openapi_tags = [
     {
         "name": "mobile-contacts",
         "description": "Contact import (with dedup), listing, and management",
+    },
+    {
+        "name": "mobile-reminders",
+        "description": "Reminder CRUD and multi-select bulk-apply to several contacts at once",
     },
 ]
 
@@ -155,6 +159,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 app.include_router(auth.router, prefix="/mobile/auth", tags=["mobile-auth"])
 app.include_router(contacts.router, prefix="/mobile/contacts", tags=["mobile-contacts"])
+app.include_router(reminders.router, prefix="/mobile/reminders", tags=["mobile-reminders"])
 
 
 @app.get("/health", summary="Service health")
