@@ -165,6 +165,47 @@ def delete_object(object_key: str) -> None:
     client.delete_object(Bucket=settings.storage_bucket_name, Key=object_key)
 
 
+def delete_objects_by_prefix(prefix: str) -> int:
+    """Bulk-deletes every object under ``prefix`` — used by account
+    deletion (§27.2 step 3: "enqueue S3 object deletion for the user's
+    full object prefix"). Object keys are built as
+    ``{user_id}/contacts/{uuid}.{ext}`` (``build_object_key`` above)
+    specifically so this is a cheap prefix delete rather than needing to
+    enumerate each ``ContactPhoto`` row's key individually. Returns the
+    number of objects deleted. A no-op (returns 0) if storage isn't
+    configured — account deletion shouldn't fail outright just because
+    this one cleanup step has nowhere to run; see the account-deletion
+    service module for why that's an acceptable, logged trade-off here,
+    in contrast to this module's usual fail-loud stance."""
+    if not (
+        settings.storage_endpoint_url
+        and settings.storage_bucket_name
+        and settings.storage_access_key_id
+        and settings.storage_secret_access_key
+    ):
+        return 0
+
+    client = _get_client()
+    deleted = 0
+    continuation_token: str | None = None
+    while True:
+        kwargs: dict[str, Any] = {"Bucket": settings.storage_bucket_name, "Prefix": prefix}
+        if continuation_token:
+            kwargs["ContinuationToken"] = continuation_token
+        response = client.list_objects_v2(**kwargs)
+        objects = response.get("Contents", [])
+        if objects:
+            client.delete_objects(
+                Bucket=settings.storage_bucket_name,
+                Delete={"Objects": [{"Key": obj["Key"]} for obj in objects]},
+            )
+            deleted += len(objects)
+        if not response.get("IsTruncated"):
+            break
+        continuation_token = response.get("NextContinuationToken")
+    return deleted
+
+
 def create_presigned_get_url(object_key: str) -> str:
     """Short-lived read URL (§26.3 — "the object's URL is not stored as a
     public permanent URL ... read access is via short-lived presigned GET

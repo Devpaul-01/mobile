@@ -21,6 +21,9 @@ from app.schemas.common import FieldError
 
 
 class ErrorCodes:
+    # Account export / deletion (§27)
+    WRONG_PASSWORD = "wrong_password"
+
     # Authentication / session
     INVALID_CREDENTIALS = "invalid_credentials"
     INVALID_REFRESH_TOKEN = "invalid_refresh_token"
