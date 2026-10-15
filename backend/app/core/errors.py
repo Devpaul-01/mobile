@@ -33,6 +33,9 @@ class ErrorCodes:
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
 
+    # Contacts
+    CONTACT_NOT_FOUND = "contact_not_found"
+
     # System
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
     VALIDATION_ERROR = "validation_error"
