@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.routers import approvals, auth, contacts, notifications, reminders, uploads
+from app.api.routers import approvals, auth, contacts, notifications, payments, reminders, uploads
 from app.core.config import settings
 from app.core.errors import AppError, ErrorCodes
 from app.core.rate_limiter import init_rate_limiter
@@ -66,6 +66,10 @@ openapi_tags = [
     {
         "name": "mobile-uploads",
         "description": "Contact photo upload (presigned Cloudflare R2 upload + confirm)",
+    },
+    {
+        "name": "mobile-payments",
+        "description": "PayPal subscription payments (create-order, capture, webhook)",
     },
 ]
 
@@ -194,6 +198,7 @@ app.include_router(
 )
 app.include_router(approvals.router, prefix="/mobile/approvals", tags=["mobile-approvals"])
 app.include_router(uploads.router, prefix="/mobile/uploads", tags=["mobile-uploads"])
+app.include_router(payments.router, prefix="/mobile/payments", tags=["mobile-payments"])
 
 
 @app.get("/health", summary="Service health")
