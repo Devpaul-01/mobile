@@ -16,6 +16,12 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "ci-test-only-secret-not-for-production-minimum32chars"
 )
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+# Importing app.main starts the APScheduler job registration in its
+# lifespan handler on app startup; the test suite never runs a real
+# lifespan cycle against the per-test SQLite engine, but async_client
+# below does trigger app import, so keep the scheduler disabled here too
+# as a second line of defense.
+os.environ.setdefault("SCHEDULER_ENABLED", "false")
 
 import uuid
 from datetime import datetime, timezone
@@ -32,7 +38,9 @@ from app.db.models import (
     ContactIdentifier,
     EmailVerificationToken,
     PasswordResetToken,
+    PushToken,
     Reminder,
+    ReminderOccurrence,
     RevokedToken,
     User,
     UserSession,
@@ -110,6 +118,23 @@ def _set_reminder_defaults(mapper, connection, target):
         target.enabled = True
     if getattr(target, "lead_time_days", None) is None:
         target.lead_time_days = 0
+
+
+@sa_event.listens_for(ReminderOccurrence, "before_insert")
+def _set_reminder_occurrence_defaults(mapper, connection, target):
+    if getattr(target, "fired_at", None) is None:
+        target.fired_at = datetime.now(timezone.utc)
+    if getattr(target, "email_attempts", None) is None:
+        target.email_attempts = 0
+
+
+@sa_event.listens_for(PushToken, "before_insert")
+def _set_push_token_defaults(mapper, connection, target):
+    now = datetime.now(timezone.utc)
+    if getattr(target, "created_at", None) is None:
+        target.created_at = now
+    if getattr(target, "last_used_at", None) is None:
+        target.last_used_at = now
 
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
