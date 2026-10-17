@@ -8,7 +8,13 @@ dependencies = [
     "fastapi>=0.136.3",
     "uvicorn[standard]>=0.22",
     "gunicorn>=22.0.0",
-    "sqlalchemy>=2.0",
+    # [asyncio] extra pulls in greenlet, which sqlalchemy.ext.asyncio
+    # requires at import time but does not list as a hard dependency of
+    # the base "sqlalchemy" distribution. Without this extra, a clean
+    # `pip install -e .` leaves greenlet missing and the app fails at
+    # import/collection time with "SQLAlchemy asyncio module requires
+    # that the Python 'greenlet' library is installed".
+    "sqlalchemy[asyncio]>=2.0",
     "asyncpg>=0.28",
     "pyjwt[crypto]>=2.13.0",
     "passlib[argon2]>=1.7",
