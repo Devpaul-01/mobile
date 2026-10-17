@@ -92,6 +92,16 @@ class Settings(BaseSettings):
         default="https://api-m.sandbox.paypal.com", alias="PAYPAL_API_BASE"
     )
 
+    # Expo push notifications (§16.3/§17.2/§25, Phase 7). Expo's push API
+    # (https://exp.host/--/api/v2/push/send) accepts unauthenticated
+    # requests, so EXPO_ACCESS_TOKEN is optional — only needed if Expo's
+    # "Enhanced Security" per-project access tokens are enabled for this
+    # project. See app/services/push.py.
+    expo_access_token: str | None = Field(default=None, alias="EXPO_ACCESS_TOKEN")
+    expo_push_api_url: str = Field(
+        default="https://exp.host/--/api/v2/push/send", alias="EXPO_PUSH_API_URL"
+    )
+
     # SMTP (§19, replaces the architecture doc's SendGrid framing — team
     # decision, see MOBILE_APP_ARCHITECTURE_SPEC.md notes). Used by both
     # auth_tokens.py (verification/reset emails) and email.py (birthday
