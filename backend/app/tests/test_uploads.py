@@ -159,6 +159,29 @@ async def test_confirm_404s_for_contact_not_owned(
     assert resp.json()["code"] == "contact_not_found"
 
 
+async def test_confirm_rejects_object_key_not_scoped_to_caller(
+    async_client: AsyncClient, db_session: AsyncSession, fake_storage
+):
+    """An object_key not prefixed with the caller's own user id must be
+    rejected before storage is ever consulted — even if an object
+    genuinely exists at that key (e.g. belongs to another user)."""
+    headers, user = await _auth_headers(async_client, db_session)
+    contact = await _create_contact(db_session, user.id)
+
+    foreign_key = "11111111-1111-1111-1111-111111111111/contacts/evil.jpg"
+    fake_storage.objects[foreign_key] = {"content_type": "image/jpeg", "size_bytes": 1024}
+
+    resp = await async_client.post(
+        "/mobile/uploads/confirm",
+        json={"object_key": foreign_key, "contact_id": str(contact.id)},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "upload_not_found"
+    # Never even looked it up — the foreign object must be untouched.
+    assert foreign_key in fake_storage.objects
+
+
 async def test_confirm_rejects_object_not_found_in_storage(
     async_client: AsyncClient, db_session: AsyncSession, fake_storage
 ):
@@ -167,7 +190,7 @@ async def test_confirm_rejects_object_not_found_in_storage(
 
     resp = await async_client.post(
         "/mobile/uploads/confirm",
-        json={"object_key": "never-uploaded.jpg", "contact_id": str(contact.id)},
+        json={"object_key": f"{user.id}/contacts/never-uploaded.jpg", "contact_id": str(contact.id)},
         headers=headers,
     )
     assert resp.status_code == 400
@@ -180,7 +203,7 @@ async def test_confirm_rejects_oversized_object_and_deletes_it(
     headers, user = await _auth_headers(async_client, db_session)
     contact = await _create_contact(db_session, user.id)
 
-    key = "oversized.jpg"
+    key = f"{user.id}/contacts/oversized.jpg"
     fake_storage.objects[key] = {"content_type": "image/jpeg", "size_bytes": 6 * 1024 * 1024}
 
     resp = await async_client.post(
@@ -198,7 +221,7 @@ async def test_confirm_creates_contact_photo_on_valid_object(
     headers, user = await _auth_headers(async_client, db_session)
     contact = await _create_contact(db_session, user.id)
 
-    key = "valid.png"
+    key = f"{user.id}/contacts/valid.png"
     fake_storage.objects[key] = {"content_type": "image/png", "size_bytes": 1024}
 
     resp = await async_client.post(
@@ -220,7 +243,7 @@ async def test_confirm_replaces_existing_photo_for_same_contact(
     headers, user = await _auth_headers(async_client, db_session)
     contact = await _create_contact(db_session, user.id)
 
-    first_key = "first.png"
+    first_key = f"{user.id}/contacts/first.png"
     fake_storage.objects[first_key] = {"content_type": "image/png", "size_bytes": 1024}
     first_resp = await async_client.post(
         "/mobile/uploads/confirm",
@@ -229,7 +252,7 @@ async def test_confirm_replaces_existing_photo_for_same_contact(
     )
     assert first_resp.status_code == 200
 
-    second_key = "second.webp"
+    second_key = f"{user.id}/contacts/second.webp"
     fake_storage.objects[second_key] = {"content_type": "image/webp", "size_bytes": 2048}
     second_resp = await async_client.post(
         "/mobile/uploads/confirm",
@@ -271,7 +294,7 @@ async def test_delete_contact_photo_removes_row_and_object(
     headers, user = await _auth_headers(async_client, db_session)
     contact = await _create_contact(db_session, user.id)
 
-    key = "to-delete.jpg"
+    key = f"{user.id}/contacts/to-delete.jpg"
     fake_storage.objects[key] = {"content_type": "image/jpeg", "size_bytes": 500}
     confirm_resp = await async_client.post(
         "/mobile/uploads/confirm",

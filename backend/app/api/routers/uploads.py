@@ -125,6 +125,19 @@ async def confirm_upload(
 ) -> ContactPhotoOut:
     contact = await _get_owned_contact(data.contact_id, current_user, db)
 
+    # The object key must be scoped to the caller — build_object_key()
+    # always mints "{user_id}/contacts/{uuid}.{ext}" (services/storage.py),
+    # so any key not prefixed with this user's own id is either a stale/
+    # foreign key or a client bug, and must never be linked to one of this
+    # user's contacts. Checked before head_object() so a foreign key is
+    # rejected without ever confirming (to the caller) whether it exists.
+    if not data.object_key.startswith(f"{current_user.id}/"):
+        raise AppError(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCodes.UPLOAD_NOT_FOUND,
+            "No object found at the given object_key — upload may not have completed.",
+        )
+
     # §26.2: never trust the client's claim that the upload succeeded —
     # verify the object actually exists before writing any metadata row.
     head = head_object(data.object_key)
