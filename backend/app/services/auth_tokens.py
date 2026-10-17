@@ -36,11 +36,16 @@ def _generate_token() -> str:
 async def _deliver(kind: str, email: str, token: str) -> None:
     """Stand-in for a real email send. Retries 3x with backoff like the
     pattern it's copied from, even though right now the 'send' never fails —
-    this keeps the call site identical to what Phase 8 will look like."""
+    this keeps the call site identical to what Phase 8 will look like.
+
+    Deliberately never logs ``token`` itself, even at DEBUG level — a
+    password-reset/verification token is credential-equivalent, and this
+    stub's whole point is standing in for a real send, not creating a
+    log-based bypass of the email channel it's stubbing out."""
     last_exc: Exception | None = None
     for attempt in range(3):
         try:
-            logger.info("[dev email stub] %s for %s — token=%s", kind, email, token)
+            logger.info("[dev email stub] %s requested for %s", kind, email)
             return
         except Exception as exc:  # pragma: no cover — stub never raises today
             last_exc = exc
