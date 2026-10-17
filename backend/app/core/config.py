@@ -7,9 +7,12 @@ silently-insecure state. New secrets, new codebase — nothing here is shared wi
 extension's backend (see MOBILE_APP_ARCHITECTURE_SPEC.md §12.5, §31).
 
 Milestone 1 (auth-only) only requires DATABASE_URL and the JWT_* settings below.
-Redis/PayPal/SendGrid settings are added in later phases (§29, §23, §19) — left
-out entirely for now rather than stubbed, so an incomplete .env fails loudly at
-the point a feature actually needs the missing setting, not silently at startup.
+Redis/PayPal settings are added in later phases (§29, §23) — left out entirely
+for now rather than stubbed, so an incomplete .env fails loudly at the point a
+feature actually needs the missing setting, not silently at startup. SMTP_*
+(§19, via plain SMTP rather than the doc's SendGrid framing — team decision)
+is optional and degrades to logging instead of sending when unset; see
+app/services/smtp.py.
 Object storage (STORAGE_*, §26) is added in this revision — see the field
 comments below for why Cloudflare R2 rather than AWS S3.
 """
@@ -88,6 +91,24 @@ class Settings(BaseSettings):
     paypal_api_base: str = Field(
         default="https://api-m.sandbox.paypal.com", alias="PAYPAL_API_BASE"
     )
+
+    # SMTP (§19, replaces the architecture doc's SendGrid framing — team
+    # decision, see MOBILE_APP_ARCHITECTURE_SPEC.md notes). Used by both
+    # auth_tokens.py (verification/reset emails) and email.py (birthday
+    # reminder emails) via the shared sender in app/services/smtp.py.
+    # Optional, same pattern as STORAGE_*/PAYPAL_*: the app boots fine
+    # without these configured (local dev, CI, tests), and the sender
+    # logs-and-returns instead of actually dispatching mail in that case.
+    # Once SMTP_HOST is set, a send failure is surfaced to the caller
+    # (the retry/backoff loop in auth_tokens._deliver / email.py) rather
+    # than silently swallowed.
+    smtp_host: str | None = Field(default=None, alias="SMTP_HOST")
+    smtp_port: int = Field(default=587, alias="SMTP_PORT")
+    smtp_username: str | None = Field(default=None, alias="SMTP_USERNAME")
+    smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
+    smtp_use_tls: bool = Field(default=True, alias="SMTP_USE_TLS")
+    smtp_from_email: str = Field(default="noreply@example.com", alias="SMTP_FROM_EMAIL")
+    smtp_from_name: str = Field(default="BirthdayMessaging", alias="SMTP_FROM_NAME")
 
     log_level: str = Field(default="INFO")
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")

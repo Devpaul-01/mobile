@@ -3,12 +3,12 @@ services/auth_tokens.py — Email-verification and password-reset token
 lifecycle: create, verify, and mark-used. Retry-with-backoff send pattern
 copied from bm-ts/backend/app/services/password_reset.py.
 
-SendGrid integration is MOBILE_APP_ARCHITECTURE_SPEC.md §19 (Phase 8) —
-not implemented yet. ``_deliver`` logs the link instead of sending a real
-email, so the auth lifecycle (register → verify → login) works end-to-end in
-local dev and in tests without a configured email provider. Swap this
-function's body for a real SendGrid call in Phase 8; nothing above it in the
-call chain needs to change.
+``_deliver`` sends via app/services/smtp.py (plain SMTP — a team decision
+in place of the architecture doc's §19 SendGrid framing). When SMTP isn't
+configured (local dev, CI, the test suite), the sender logs and returns
+success without opening a connection, so the auth lifecycle
+(register → verify → login) still works end-to-end without a real mail
+server configured.
 """
 
 from __future__ import annotations
@@ -22,8 +22,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import EmailVerificationToken, PasswordResetToken, User
+from app.services.smtp import send_email
 
 logger = logging.getLogger(__name__)
+
+_SUBJECTS = {
+    "email verification": "Verify your email",
+    "password reset": "Reset your password",
+}
 
 _VERIFICATION_TOKEN_TTL = timedelta(hours=24)
 _RESET_TOKEN_TTL = timedelta(minutes=30)
@@ -34,20 +40,25 @@ def _generate_token() -> str:
 
 
 async def _deliver(kind: str, email: str, token: str) -> None:
-    """Stand-in for a real email send. Retries 3x with backoff like the
-    pattern it's copied from, even though right now the 'send' never fails —
-    this keeps the call site identical to what Phase 8 will look like.
+    """Send a verification/reset email via SMTP, retrying 3x with backoff
+    on failure (only relevant once SMTP_HOST is actually configured —
+    see app/services/smtp.py for the unconfigured-environment behavior).
 
     Deliberately never logs ``token`` itself, even at DEBUG level — a
-    password-reset/verification token is credential-equivalent, and this
-    stub's whole point is standing in for a real send, not creating a
-    log-based bypass of the email channel it's stubbing out."""
+    password-reset/verification token is credential-equivalent, and
+    logging it would be a bypass of the email channel this function
+    exists to send it over."""
+    body = f"Your {kind} code:\n\n{token}\n\nThis code will expire soon."
     last_exc: Exception | None = None
     for attempt in range(3):
         try:
-            logger.info("[dev email stub] %s requested for %s", kind, email)
+            await send_email(
+                to_email=email,
+                subject=_SUBJECTS.get(kind, kind.title()),
+                body=body,
+            )
             return
-        except Exception as exc:  # pragma: no cover — stub never raises today
+        except Exception as exc:
             last_exc = exc
             if attempt < 2:
                 await asyncio.sleep(2**attempt)
