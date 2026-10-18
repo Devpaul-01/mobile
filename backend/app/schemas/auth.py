@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
+from app.core.validators import sanitize_text
+
 
 class RegisterRequest(BaseModel):
     """Registration payload — email is validated as a proper address; password minimum 8 chars."""
@@ -78,6 +80,8 @@ class UserProfileUpdate(BaseModel):
 
     name: Optional[str] = Field(None, max_length=255)
     timezone: Optional[str] = Field(None, max_length=100)
+
+    _sanitize_name = field_validator("name", mode="after")(sanitize_text)
 
     @field_validator("timezone")
     @classmethod

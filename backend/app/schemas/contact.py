@@ -18,6 +18,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from app.core.validators import sanitize_text
 from app.db.models import ContactSource
 
 
@@ -48,6 +49,8 @@ class ContactImportItem(BaseModel):
     )
     birthday: ContactImportBirthday | None = None
     device_contact_id: str | None = Field(default=None, max_length=255)
+
+    _sanitize_name = field_validator("name", mode="after")(sanitize_text)
 
     @field_validator("emails")
     @classmethod
@@ -97,6 +100,9 @@ class ContactUpdate(BaseModel):
     birthday_day: int | None = Field(default=None, ge=1, le=31)
     birthday_year: int | None = Field(default=None, ge=1900, le=2100)
     notes: Annotated[str, StringConstraints(max_length=10_000)] | None = None
+
+    _sanitize_name = field_validator("name", mode="after")(sanitize_text)
+    _sanitize_notes = field_validator("notes", mode="after")(sanitize_text)
 
 
 class ContactListResponse(BaseModel):
