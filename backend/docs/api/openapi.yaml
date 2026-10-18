@@ -325,6 +325,71 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
       security:
       - OAuth2PasswordBearer: []
+    patch:
+      tags:
+      - mobile-auth
+      summary: Update Me
+      description: "Partial update of the current user's name and/or timezone \u2014\
+        \ a field\nleft out of the payload is left unchanged. See UserProfileUpdate\
+        \ for\nwhy ``timezone`` is validated as a real IANA zone name."
+      operationId: update_me_mobile_auth_me_patch
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserProfileUpdate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unprocessable Content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Too Many Requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      security:
+      - OAuth2PasswordBearer: []
   /mobile/auth/request-email-verification:
     post:
       tags:
@@ -2924,6 +2989,32 @@ components:
       title: UserProfile
       description: Public profile returned by GET /mobile/auth/me. ORM-mapped from
         the ``User`` model.
+    UserProfileUpdate:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+          title: Name
+        timezone:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+          title: Timezone
+      type: object
+      title: UserProfileUpdate
+      description: "Payload for PATCH /mobile/auth/me. Both fields optional/independent\
+        \ \u2014\nsending only one leaves the other unchanged (see the router).\n\n\
+        ``timezone`` must be a real IANA zone name (e.g. \"America/New_York\"),\n\
+        not just any string under 100 chars \u2014 the scheduler does\n``ZoneInfo(user.timezone)``\
+        \ for every reminder on every pass\n(services/scheduler.py \xA716.2) with\
+        \ no try/except around that call, so\nan invalid value saved here would crash\
+        \ the scheduler pass for every\nuser being evaluated in that run, not just\
+        \ this one. Validating at\nwrite time, where a client can see and correct\
+        \ the error, is far\nbetter than discovering it later inside a background\
+        \ job with no\ncaller to report it to."
     ValidationError:
       properties:
         loc:

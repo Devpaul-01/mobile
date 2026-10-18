@@ -14,8 +14,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
 
 class RegisterRequest(BaseModel):
@@ -62,5 +63,31 @@ class UserProfile(BaseModel):
 
 
 class UserProfileUpdate(BaseModel):
+    """Payload for PATCH /mobile/auth/me. Both fields optional/independent —
+    sending only one leaves the other unchanged (see the router).
+
+    ``timezone`` must be a real IANA zone name (e.g. "America/New_York"),
+    not just any string under 100 chars — the scheduler does
+    ``ZoneInfo(user.timezone)`` for every reminder on every pass
+    (services/scheduler.py §16.2) with no try/except around that call, so
+    an invalid value saved here would crash the scheduler pass for every
+    user being evaluated in that run, not just this one. Validating at
+    write time, where a client can see and correct the error, is far
+    better than discovering it later inside a background job with no
+    caller to report it to."""
+
     name: Optional[str] = Field(None, max_length=255)
     timezone: Optional[str] = Field(None, max_length=100)
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(
+                f"{v!r} is not a recognized IANA timezone name (e.g. 'America/New_York', 'UTC')"
+            ) from exc
+        return v

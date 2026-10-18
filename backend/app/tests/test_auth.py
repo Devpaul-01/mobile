@@ -181,6 +181,73 @@ async def test_me_returns_profile_for_valid_token(async_client: AsyncClient, db_
     assert resp.json()["email_verified"] is True
 
 
+async def test_update_me_requires_authentication(async_client: AsyncClient):
+    resp = await async_client.patch("/mobile/auth/me", json={"timezone": "UTC"})
+    assert resp.status_code == 401
+
+
+async def test_update_me_sets_name_and_timezone(async_client: AsyncClient, db_session: AsyncSession):
+    await _register_and_verify(async_client, db_session, "tzuser@example.com", "TestPass123!")
+    login_resp = await async_client.post(
+        "/mobile/auth/login", json={"email": "tzuser@example.com", "password": "TestPass123!"}
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    resp = await async_client.patch(
+        "/mobile/auth/me",
+        json={"name": "Taylor", "timezone": "America/New_York"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["name"] == "Taylor"
+    assert body["timezone"] == "America/New_York"
+
+    result = await db_session.execute(select(User).where(User.email == "tzuser@example.com"))
+    user = result.scalar_one()
+    assert user.name == "Taylor"
+    assert user.timezone == "America/New_York"
+
+
+async def test_update_me_partial_update_leaves_other_field_unchanged(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    await _register_and_verify(async_client, db_session, "tzpartial@example.com", "TestPass123!")
+    login_resp = await async_client.post(
+        "/mobile/auth/login", json={"email": "tzpartial@example.com", "password": "TestPass123!"}
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    first = await async_client.patch(
+        "/mobile/auth/me", json={"name": "Taylor", "timezone": "UTC"}, headers=headers
+    )
+    assert first.status_code == 200
+
+    second = await async_client.patch(
+        "/mobile/auth/me", json={"name": "Alex"}, headers=headers
+    )
+    assert second.status_code == 200
+    assert second.json()["name"] == "Alex"
+    assert second.json()["timezone"] == "UTC"  # untouched by the second call
+
+
+async def test_update_me_rejects_invalid_timezone(async_client: AsyncClient, db_session: AsyncSession):
+    await _register_and_verify(async_client, db_session, "badtz@example.com", "TestPass123!")
+    login_resp = await async_client.post(
+        "/mobile/auth/login", json={"email": "badtz@example.com", "password": "TestPass123!"}
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    resp = await async_client.patch(
+        "/mobile/auth/me", json={"timezone": "Not/A_Real_Zone"}, headers=headers
+    )
+    assert resp.status_code == 422
+
+    result = await db_session.execute(select(User).where(User.email == "badtz@example.com"))
+    user = result.scalar_one()
+    assert user.timezone is None  # rejected before anything was written
+
+
 async def test_logout_revokes_refresh_token(async_client: AsyncClient, db_session: AsyncSession):
     await _register_and_verify(async_client, db_session, "logout@example.com", "TestPass123!")
     login_resp = await async_client.post(

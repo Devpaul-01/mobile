@@ -53,6 +53,7 @@ from app.schemas.auth import (
     RefreshRequest,
     TokenResponse,
     UserProfile,
+    UserProfileUpdate,
 )
 from app.schemas.common import ErrorResponse, MessageResponse
 from app.schemas.email_verification import (
@@ -416,6 +417,25 @@ async def me(
     current_user: User = Depends(get_current_user_allow_unverified),
 ) -> UserProfile:
     """Return the profile of the currently authenticated user."""
+    return UserProfile.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserProfile)
+async def update_me(
+    data: UserProfileUpdate,
+    current_user: User = Depends(get_current_user_allow_unverified),
+    db: AsyncSession = Depends(get_db),
+) -> UserProfile:
+    """Partial update of the current user's name and/or timezone — a field
+    left out of the payload is left unchanged. See UserProfileUpdate for
+    why ``timezone`` is validated as a real IANA zone name."""
+    fields = data.model_dump(exclude_unset=True)
+    if "name" in fields:
+        current_user.name = fields["name"]
+    if "timezone" in fields:
+        current_user.timezone = fields["timezone"]
+    await db.commit()
+    await db.refresh(current_user)
     return UserProfile.model_validate(current_user)
 
 
