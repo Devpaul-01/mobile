@@ -23,6 +23,11 @@ dependencies = [
     "email-validator>=2",
     "pydantic-settings>=2.14.2",
     "slowapi>=0.1.8",
+    # Rate limiting (core/rate_limiter.py) and session-validity caching
+    # (core/redis_client.py) — Redis adopted per an explicit team decision
+    # rather than deferred to Phase 10 as the architecture doc originally
+    # scoped it (§25/§29/§41); see docs/development/implementation-status.md.
+    "redis>=5.0",
     "apscheduler>=3.10",
     # S3-compatible client — used against Cloudflare R2 per an explicit
     # team decision (not AWS), see app/core/config.py and

@@ -7,14 +7,23 @@ silently-insecure state. New secrets, new codebase — nothing here is shared wi
 extension's backend (see MOBILE_APP_ARCHITECTURE_SPEC.md §12.5, §31).
 
 Milestone 1 (auth-only) only requires DATABASE_URL and the JWT_* settings below.
-Redis/PayPal settings are added in later phases (§29, §23) — left out entirely
-for now rather than stubbed, so an incomplete .env fails loudly at the point a
-feature actually needs the missing setting, not silently at startup. SMTP_*
-(§19, via plain SMTP rather than the doc's SendGrid framing — team decision)
-is optional and degrades to logging instead of sending when unset; see
-app/services/smtp.py.
+PayPal settings are added in a later phase (§23) — left out entirely for now
+rather than stubbed, so an incomplete .env fails loudly at the point a feature
+actually needs the missing setting, not silently at startup. SMTP_* (§19, via
+plain SMTP rather than the doc's SendGrid framing — team decision) is optional
+and degrades to logging instead of sending when unset; see app/services/smtp.py.
 Object storage (STORAGE_*, §26) is added in this revision — see the field
 comments below for why Cloudflare R2 rather than AWS S3.
+
+REDIS_URL is an exception to the "left out until the phase needs it" rule
+above: per an explicit team decision, Redis is adopted now rather than
+deferred to Phase 10 as the architecture doc originally scoped it (§25/§29/
+§41) — see docs/development/implementation-status.md. It's optional here on
+purpose — ``redis_url`` defaults to ``None``, and every Redis-backed feature
+(rate limiting in core/rate_limiter.py, session-validity caching in
+core/redis_client.py) falls back to in-process/no-op behavior when it's
+unset or unreachable, per that same decision (fail open, never fail closed —
+a down Redis can only make things slower, never less correct or less secure).
 """
 
 from __future__ import annotations
@@ -51,6 +60,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:8081"]
     )
+
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
     # Reminder scheduler (Phase 6, §16.2) — an APScheduler job inside the
     # running app process, not a separate worker (see services/scheduler.py

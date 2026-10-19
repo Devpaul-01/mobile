@@ -44,6 +44,7 @@ from app.core.jwt import (
     ensure_token_type,
 )
 from app.core.rate_limiter import limiter
+from app.core.redis_client import invalidate_session_cache
 from app.core.security import hash_password, verify_password
 from app.db.models import RevokedToken, User, UserSession
 from app.db.session import get_db
@@ -185,6 +186,10 @@ async def _revoke_session_record(
         user_id=session.user_id,
         expires_at=session.expires_at,
     )
+    # Bound how long a just-revoked session could still read as valid via
+    # the Redis session-validity cache (core/redis_client.py) — best-effort,
+    # the cache's own short TTL is the backstop if this call itself fails.
+    await invalidate_session_cache(str(session.id))
 
 
 @router.post(
