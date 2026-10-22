@@ -52,8 +52,42 @@ Downstream actions on a newly-created occurrence
   queue, where the user taps "Send via WhatsApp" themselves.
 
 This module also runs ``expire_stale_approvals`` each cycle (§17.2) —
-any approval still ``PENDING_APPROVAL`` after 7 days is marked ``EXPIRED``,
-not deleted.
+any approval still ``PENDING_APPROVAL`` after 7 days (or, if later, past
+the contact's birthday — see services/approvals.py's ``_expiry_floor``)
+is marked ``EXPIRED``, not deleted.
+
+Birthday-day email: a second, independent evaluation
+-------------------------------------------------------
+The section above describes the original, lead-time-based reminder
+(a heads-up to the *user*, at ``lead_time_days`` before the birthday).
+Separately — per an explicit team decision — a reminder whose
+``channels`` includes ``email`` also gets an **actual birthday message
+sent to the contact**, evaluated independently of ``lead_time_days``:
+``evaluate_birthday_day_emails`` below checks, for every ``email``-
+channel reminder, whether the contact's birthday itself (not the
+reminder's configured trigger date) falls in the current pass's trigger
+window. This is deliberately a second pass over the same reminders,
+not folded into ``evaluate_reminders``'s loop above, so a reminder
+configured with a long lead time (e.g. 14 days) still gets its
+birthday-day email check on the actual day, regardless of when its own
+lead-time reminder already fired.
+
+When that fires:
+  - ``User.auto_send_email=True`` (opt-in, default False) → the message
+    is composed and sent immediately via SMTP, with the outcome recorded
+    as an already-``completed``/``link_failed`` ``PendingApproval`` row
+    (``services/approvals.py create_completed_approval``) — so "was
+    this contact's birthday message actually sent" has one place to
+    look regardless of whether it was sent automatically or manually.
+  - Otherwise (the default) → a ``PendingApproval`` is created in
+    ``pending_approval``, with the composed message already filled in
+    as an editable draft, exactly mirroring how whatsapp's approval
+    queue already works — the user reviews/edits/sends from there.
+
+WhatsApp is unaffected by any of this — it keeps working exactly as
+described above, anchored to the reminder's own lead-time trigger, and
+can never be auto-sent regardless of ``auto_send_email`` (that setting
+only ever applies to the email channel).
 """
 
 from __future__ import annotations
@@ -67,11 +101,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models import Contact, EmailStatus, PushToken, Reminder, ReminderOccurrence, User
+from app.db.models import (
+    ApprovalChannel,
+    Contact,
+    ContactIdentifier,
+    ContactIdentifierType,
+    EmailStatus,
+    PendingApproval,
+    PushToken,
+    Reminder,
+    ReminderOccurrence,
+    User,
+)
 from app.db.session import AsyncSessionLocal
-from app.services.approvals import create_pending_approval, expire_stale_approvals
+from app.services.approvals import (
+    create_completed_approval,
+    create_pending_approval,
+    expire_stale_approvals,
+)
 from app.services.email import send_reminder_email
+from app.services.message_templates import email_body, email_subject
 from app.services.push import send_approval_queue_push, send_push_notification
+from app.services.smtp import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +264,32 @@ async def _create_occurrence_idempotent(
     return occurrence
 
 
+async def _get_or_create_occurrence(
+    db: AsyncSession, *, reminder: Reminder, occurrence_year: int
+) -> ReminderOccurrence:
+    """Like ``_create_occurrence_idempotent``, but for a caller
+    (``evaluate_birthday_day_emails``) that needs the occurrence row
+    either way — whether it already existed (most commonly: created by
+    ``evaluate_reminders`` for the same ``(reminder_id, occurrence_year)``
+    moments earlier in the same scheduler pass) or had to be created
+    fresh here. Always returns a row, never ``None``; the caller is
+    responsible for its own separate idempotency check (did *this*
+    action already happen for this occurrence) rather than relying on
+    "did I get to create a new row" the way ``evaluate_reminders`` does."""
+    occurrence = await _create_occurrence_idempotent(
+        db, reminder=reminder, occurrence_year=occurrence_year
+    )
+    if occurrence is not None:
+        return occurrence
+    result = await db.execute(
+        select(ReminderOccurrence).where(
+            ReminderOccurrence.reminder_id == reminder.id,
+            ReminderOccurrence.occurrence_year == occurrence_year,
+        )
+    )
+    return result.scalar_one()
+
+
 async def _trigger_downstream_actions(
     db: AsyncSession,
     *,
@@ -259,6 +336,174 @@ async def _trigger_downstream_actions(
             await send_approval_queue_push(
                 device_token=push_token.device_token, contact_name=contact.name
             )
+
+
+async def evaluate_birthday_day_emails(
+    db: AsyncSession, *, now: datetime | None = None
+) -> list:
+    """Second, independent evaluation pass — see this module's docstring
+    ("Birthday-day email") for why this is separate from
+    ``evaluate_reminders`` above. Checks every enabled reminder with
+    ``email`` in its channels for whether the contact's birthday itself
+    (``lead_time_days=0``, regardless of the reminder's own configured
+    lead time) falls in the current trailing window, and either sends
+    immediately (``User.auto_send_email=True``) or creates an editable
+    ``PendingApproval`` draft. Returns the ``ReminderOccurrence`` rows
+    this pass actually took an email action for (reuses, rather than
+    always creating, the occurrence row — see ``_get_or_create_occurrence``
+    and the comment at its call site below for why "got an occurrence
+    row" and "already handled email for it" are checked separately).
+    """
+    now = now or datetime.now(timezone.utc)
+    window_start = now - timedelta(minutes=_WINDOW_MINUTES)
+
+    result = await db.execute(
+        select(Reminder)
+        .join(Contact, Contact.id == Reminder.contact_id)
+        .where(
+            Reminder.enabled.is_(True),
+            Contact.deleted_at.is_(None),
+            Contact.birthday_month.is_not(None),
+            Contact.birthday_day.is_not(None),
+        )
+        .options(selectinload(Reminder.contact))
+    )
+    reminders = result.scalars().all()
+
+    created: list[ReminderOccurrence] = []
+    for reminder in reminders:
+        if "email" not in reminder.channels:
+            continue
+        contact = reminder.contact
+        assert contact.birthday_month is not None
+        assert contact.birthday_day is not None
+        user_result = await db.execute(select(User).where(User.id == reminder.user_id))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            continue
+        tz = ZoneInfo(user.timezone) if user.timezone else timezone.utc
+
+        for candidate_year in (now.year - 1, now.year, now.year + 1):
+            trigger_moment = _trigger_moment_utc(
+                month=contact.birthday_month,
+                day=contact.birthday_day,
+                candidate_year=candidate_year,
+                lead_time_days=0,  # birthday-day check, independent of the reminder's own lead time
+                tz=tz,  # type: ignore[arg-type]
+            )
+            if not (window_start < trigger_moment <= now):
+                continue
+
+            # Reuse the occurrence row evaluate_reminders may already have
+            # created for this exact (reminder_id, occurrence_year) this
+            # same run or an earlier one — e.g. a reminder with both
+            # whatsapp and email channels, or an email-only reminder whose
+            # lead-time trigger happens to fall in the same window as its
+            # birthday-day check (lead_time_days=0). The real idempotency
+            # guarantee for *this* pass's own action is the PendingApproval
+            # uniqueness on (reminder_occurrence_id, channel) below —
+            # "already have a ReminderOccurrence" and "already handled
+            # email for it" are two different questions.
+            occurrence = await _get_or_create_occurrence(
+                db, reminder=reminder, occurrence_year=candidate_year
+            )
+
+            already_handled = await db.execute(
+                select(PendingApproval.id).where(
+                    PendingApproval.reminder_occurrence_id == occurrence.id,
+                    PendingApproval.channel == ApprovalChannel.EMAIL,
+                )
+            )
+            if already_handled.scalar_one_or_none() is not None:
+                break  # this occurrence's email action already exists — nothing to do
+
+            birthday_date = _birthday_in_year(
+                contact.birthday_month, contact.birthday_day, candidate_year
+            )
+            await _send_or_queue_birthday_email(
+                db,
+                reminder=reminder,
+                contact=contact,
+                user=user,
+                occurrence=occurrence,
+                birthday_date=birthday_date,
+            )
+            created.append(occurrence)
+            break  # at most one candidate year can match per reminder per run
+
+    return created
+
+
+async def _send_or_queue_birthday_email(
+    db: AsyncSession,
+    *,
+    reminder: Reminder,
+    contact: Contact,
+    user: User,
+    occurrence: ReminderOccurrence,
+    birthday_date: date,
+) -> None:
+    subject = email_subject(contact.name)
+    body = email_body(contact.name)
+
+    if user.auto_send_email:
+        contact_email = await _contact_email_for_scheduler(db, contact_id=contact.id)
+        success = False
+        if contact_email:
+            try:
+                await send_email(to_email=contact_email, subject=subject, body=body)
+                success = True
+            except Exception:
+                logger.exception(
+                    "Auto-send birthday email failed for contact %s", contact.id
+                )
+        await create_completed_approval(
+            db,
+            reminder_occurrence_id=occurrence.id,
+            user_id=user.id,
+            contact_id=contact.id,
+            message_subject=subject,
+            message_body=body,
+            success=success,
+            birthday_this_occurrence=birthday_date,
+        )
+    else:
+        await create_pending_approval(
+            db,
+            reminder_occurrence_id=occurrence.id,
+            user_id=user.id,
+            contact_id=contact.id,
+            channel=ApprovalChannel.EMAIL,
+            message_subject=subject,
+            message_body=body,
+            birthday_this_occurrence=birthday_date,
+        )
+        push_tokens_result = await db.execute(
+            select(PushToken).where(PushToken.user_id == user.id)
+        )
+        for push_token in push_tokens_result.scalars().all():
+            await send_approval_queue_push(
+                device_token=push_token.device_token, contact_name=contact.name
+            )
+
+
+async def _contact_email_for_scheduler(db: AsyncSession, *, contact_id) -> str | None:
+    """Duplicated, deliberately small, query rather than importing
+    services/approvals.py's private ``_contact_email`` here — that one
+    takes a ``PendingApproval`` (it needs ``approval.contact_id``), this
+    one is called before any approval row exists yet for the auto-send
+    path. Both do the same lookup; not worth a shared helper for one
+    three-line query."""
+    result = await db.execute(
+        select(ContactIdentifier.normalized_value)
+        .where(
+            ContactIdentifier.contact_id == contact_id,
+            ContactIdentifier.type == ContactIdentifierType.EMAIL,
+        )
+        .order_by(ContactIdentifier.created_at.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def retry_failed_emails(db: AsyncSession) -> int:
@@ -316,14 +561,16 @@ async def run_scheduler_cycle() -> None:
             return
         try:
             created = await evaluate_reminders(db)
+            birthday_emails = await evaluate_birthday_day_emails(db)
             retried = await retry_failed_emails(db)
             expired = await expire_stale_approvals(db)
             await db.commit()
-            if created or retried or expired:
+            if created or birthday_emails or retried or expired:
                 logger.info(
-                    "Scheduler cycle: %d occurrence(s) created, %d email retry(ies), "
-                    "%d approval(s) expired.",
+                    "Scheduler cycle: %d occurrence(s) created, %d birthday-day "
+                    "email(s) evaluated, %d email retry(ies), %d approval(s) expired.",
                     len(created),
+                    len(birthday_emails),
                     retried,
                     expired,
                 )

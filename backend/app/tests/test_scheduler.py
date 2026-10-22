@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
 from app.db.models import (
+    ApprovalChannel,
     ApprovalState,
     Contact,
+    ContactIdentifier,
     ContactSource,
     EmailStatus,
     PendingApproval,
@@ -26,6 +28,7 @@ from app.db.models import (
 )
 from app.services.scheduler import (
     _try_acquire_scheduler_lock,
+    evaluate_birthday_day_emails,
     evaluate_reminders,
     retry_failed_emails,
 )
@@ -289,6 +292,237 @@ async def test_evaluate_reminders_sends_approval_queue_push_for_whatsapp(
 
     assert len(created) == 1
     assert calls == [("wa-token", contact.name)]
+
+
+async def _add_contact_email(db_session: AsyncSession, contact_id, email: str) -> None:
+    db_session.add(
+        ContactIdentifier(
+            contact_id=contact_id,
+            type="email",
+            normalized_value=email,
+            raw_value=email,
+        )
+    )
+    await db_session.flush()
+
+
+# ---------------------------------------------------------------------------
+# Birthday-day email: auto-send vs. pending approval
+# ---------------------------------------------------------------------------
+
+
+async def test_birthday_day_email_creates_pending_approval_by_default(
+    db_session: AsyncSession,
+):
+    """User.auto_send_email defaults to False — the default behavior for
+    an email-channel reminder, on the contact's actual birthday, must be
+    an editable PendingApproval, not an automatic send."""
+    user = await _make_user(db_session, "bday-default@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=1, name="Alex Doe")
+    await _add_contact_email(db_session, contact.id, "alex@example.com")
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 1, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert len(created) == 1
+    result = await db_session.execute(
+        select(PendingApproval).where(PendingApproval.reminder_occurrence_id == created[0].id)
+    )
+    approval = result.scalar_one()
+    assert approval.channel == ApprovalChannel.EMAIL
+    assert approval.state == ApprovalState.PENDING_APPROVAL
+    assert approval.message_subject and "Alex" in approval.message_subject
+    assert approval.message_body and "Alex" in approval.message_body
+
+
+async def test_birthday_day_email_auto_sends_when_user_opts_in(db_session: AsyncSession):
+    """User.auto_send_email=True on the contact's actual birthday sends
+    immediately and records the outcome as an already-settled approval
+    row, rather than waiting in the queue."""
+    user = await _make_user(db_session, "bday-autosend@example.com", "UTC")
+    user.auto_send_email = True
+    await db_session.flush()
+    contact = await _make_contact(db_session, user.id, month=6, day=2, name="Sam Lee")
+    await _add_contact_email(db_session, contact.id, "sam@example.com")
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 2, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert len(created) == 1
+    result = await db_session.execute(
+        select(PendingApproval).where(PendingApproval.reminder_occurrence_id == created[0].id)
+    )
+    approval = result.scalar_one()
+    assert approval.channel == ApprovalChannel.EMAIL
+    assert approval.state == ApprovalState.COMPLETED
+    assert approval.message_body and "Sam" in approval.message_body
+
+
+async def test_birthday_day_email_auto_send_records_failure_when_no_contact_email(
+    db_session: AsyncSession,
+):
+    """Auto-send with no email on file for the contact can't succeed —
+    must record link_failed, not silently do nothing or raise."""
+    user = await _make_user(db_session, "bday-noemail@example.com", "UTC")
+    user.auto_send_email = True
+    await db_session.flush()
+    contact = await _make_contact(db_session, user.id, month=6, day=3, name="No Email")
+    # deliberately no ContactIdentifier added
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 3, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert len(created) == 1
+    result = await db_session.execute(
+        select(PendingApproval).where(PendingApproval.reminder_occurrence_id == created[0].id)
+    )
+    approval = result.scalar_one()
+    assert approval.state == ApprovalState.LINK_FAILED
+
+
+async def test_birthday_day_email_ignores_reminders_without_email_channel(
+    db_session: AsyncSession,
+):
+    user = await _make_user(db_session, "bday-pushonly@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=4)
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["push"])
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 4, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=now)
+    assert created == []
+
+
+async def test_birthday_day_email_fires_on_birthday_regardless_of_lead_time(
+    db_session: AsyncSession,
+):
+    """The whole point of evaluating this separately from
+    evaluate_reminders: a reminder configured with a 14-day lead time
+    must still get its birthday-day email check on the actual day, not
+    only 14 days early."""
+    user = await _make_user(db_session, "bday-leadtime@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=5)
+    await _add_contact_email(db_session, contact.id, "leadtime@example.com")
+    await _make_reminder(
+        db_session, user_id=user.id, contact_id=contact.id, lead_time_days=14, channels=["email"]
+    )
+
+    year = datetime.now(timezone.utc).year
+    # 14 days early: evaluate_reminders would fire here, but the
+    # birthday-day email check must NOT fire yet.
+    early = datetime(year, 5, 22, 9, 0, tzinfo=timezone.utc)
+    assert await evaluate_birthday_day_emails(db_session, now=early) == []
+
+    # On the actual birthday: must fire.
+    on_day = datetime(year, 6, 5, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=on_day)
+    await db_session.commit()
+    assert len(created) == 1
+
+
+async def test_birthday_day_email_is_idempotent_across_repeated_runs(db_session: AsyncSession):
+    user = await _make_user(db_session, "bday-idempotent@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=6)
+    await _add_contact_email(db_session, contact.id, "idempotent@example.com")
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 6, 9, 0, tzinfo=timezone.utc)
+    first = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+    assert len(first) == 1
+
+    second = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+    assert len(second) == 0
+
+
+async def test_birthday_day_email_and_whatsapp_can_coexist_on_same_reminder(
+    db_session: AsyncSession,
+):
+    """A reminder with both whatsapp and email enabled must get a
+    PendingApproval for each channel, not have the second overwrite or
+    conflict with the first — the reason PendingApproval's uniqueness
+    widened to (occurrence, channel)."""
+    user = await _make_user(db_session, "bday-both@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=7)
+    await _add_contact_email(db_session, contact.id, "both@example.com")
+    await _make_reminder(
+        db_session, user_id=user.id, contact_id=contact.id, channels=["whatsapp", "email"]
+    )
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 7, 9, 0, tzinfo=timezone.utc)
+    reminder_created = await evaluate_reminders(db_session, now=now)
+    email_created = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert len(reminder_created) == 1  # whatsapp approval, via evaluate_reminders
+    assert len(email_created) == 1  # email approval, via evaluate_birthday_day_emails
+
+    result = await db_session.execute(
+        select(PendingApproval).where(PendingApproval.user_id == user.id)
+    )
+    approvals = result.scalars().all()
+    channels = {a.channel for a in approvals}
+    assert channels == {ApprovalChannel.WHATSAPP, ApprovalChannel.EMAIL}
+
+
+async def test_birthday_day_email_sends_approval_queue_push(db_session: AsyncSession, monkeypatch):
+    user = await _make_user(db_session, "bday-push@example.com", "UTC")
+    contact = await _make_contact(db_session, user.id, month=6, day=8)
+    await _add_contact_email(db_session, contact.id, "pushme@example.com")
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+    db_session.add(
+        PushToken(user_id=user.id, device_token="bday-token", platform=PushPlatform.IOS)
+    )
+    await db_session.flush()
+
+    calls = []
+
+    async def _record(*, device_token: str, contact_name: str) -> None:
+        calls.append((device_token, contact_name))
+
+    monkeypatch.setattr("app.services.scheduler.send_approval_queue_push", _record)
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 8, 9, 0, tzinfo=timezone.utc)
+    created = await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert len(created) == 1
+    assert calls == [("bday-token", contact.name)]
+
+
+async def test_birthday_day_email_auto_send_does_not_push(db_session: AsyncSession, monkeypatch):
+    """The approval-queue push is specifically for 'something is waiting
+    for you to review' — an auto-sent email already happened, so no push
+    is needed for it."""
+    user = await _make_user(db_session, "bday-autosend-nopush@example.com", "UTC")
+    user.auto_send_email = True
+    await db_session.flush()
+    contact = await _make_contact(db_session, user.id, month=6, day=9)
+    await _add_contact_email(db_session, contact.id, "nopush@example.com")
+    await _make_reminder(db_session, user_id=user.id, contact_id=contact.id, channels=["email"])
+    db_session.add(
+        PushToken(user_id=user.id, device_token="should-not-fire", platform=PushPlatform.IOS)
+    )
+    await db_session.flush()
+
+    calls = []
+
+    async def _record(*, device_token: str, contact_name: str) -> None:
+        calls.append((device_token, contact_name))
+
+    monkeypatch.setattr("app.services.scheduler.send_approval_queue_push", _record)
+
+    now = datetime(datetime.now(timezone.utc).year, 6, 9, 9, 0, tzinfo=timezone.utc)
+    await evaluate_birthday_day_emails(db_session, now=now)
+    await db_session.commit()
+
+    assert calls == []
 
 
 # ---------------------------------------------------------------------------
