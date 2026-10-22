@@ -71,6 +71,8 @@ def _set_user_defaults(mapper, connection, target):
         target.failed_login_count = 0
     if getattr(target, "email_verified", None) is None:
         target.email_verified = False
+    if getattr(target, "auto_send_email", None) is None:
+        target.auto_send_email = False
 
 
 @sa_event.listens_for(UserSession, "before_insert")

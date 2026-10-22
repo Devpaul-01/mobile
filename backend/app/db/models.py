@@ -107,6 +107,17 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(
         Boolean(), nullable=False, server_default=text("false")
     )
+    # Opt-in (default False — nothing changes for an existing user until
+    # they turn it on): if True, a reminder's birthday-message email
+    # (channel="email") is sent automatically once the scheduler
+    # considers it "close enough" to the contact's actual birthday,
+    # rather than waiting in the Approval Queue for a manual tap.
+    # Per an explicit team decision — see services/scheduler.py's
+    # birthday-day email check for exactly what "close enough" means.
+    # WhatsApp is unaffected either way; it can never be auto-sent.
+    auto_send_email: Mapped[bool] = mapped_column(
+        Boolean(), nullable=False, server_default=text("false")
+    )
     failed_login_count: Mapped[int] = mapped_column(
         "failed_login_count", nullable=False, server_default=text("0"), default=0
     )
@@ -580,14 +591,14 @@ class ApprovalState(str, enum.Enum):
 
 
 class ApprovalChannel(str, enum.Enum):
-    """Only ``whatsapp`` exists today — this is a separate enum (rather
-    than reusing ``ReminderChannel``) because a ``PendingApproval`` only
-    ever exists *for* the whatsapp channel (§17); push/email never create
-    one. Kept as its own enum rather than a hardcoded string so a second
-    approval-gated channel, if one is ever added, doesn't need a schema
-    migration just to widen a string column's implied meaning."""
+    """A second approval-gated channel, exactly as this docstring once
+    anticipated: ``email`` now also creates a ``PendingApproval`` when a
+    reminder's email isn't eligible for (or isn't configured for)
+    auto-send — see ``User.auto_send_email`` and
+    ``services/scheduler.py``'s birthday-day email check."""
 
     WHATSAPP = "whatsapp"
+    EMAIL = "email"
 
 
 class ApprovalActor(str, enum.Enum):
@@ -599,19 +610,43 @@ class ApprovalActor(str, enum.Enum):
 
 
 class PendingApproval(Base):
-    """One row per WhatsApp send awaiting the user's manual tap-to-send
-    (MOBILE_APP_ARCHITECTURE_SPEC.md §17). Created by the scheduler
-    (``app/services/scheduler.py``) when a firing ``ReminderOccurrence``
-    requests the ``whatsapp`` channel — never created directly by an API
-    call, since the whole point of this table is that the *scheduler*
-    decided a WhatsApp reminder is due; the API only ever moves an
-    existing row through its states (approve/report-opened/dismiss).
+    """One row per WhatsApp or email birthday-message send awaiting the
+    user's manual tap-to-send (MOBILE_APP_ARCHITECTURE_SPEC.md §17;
+    email extended per an explicit team decision — see
+    ``User.auto_send_email`` and ``services/scheduler.py``). Created by
+    the scheduler (``app/services/scheduler.py``) — never created
+    directly by an API call, since the whole point of this table is that
+    the *scheduler* decided a send is due; the API only ever moves an
+    existing row through its states.
 
-    The unique constraint on ``reminder_occurrence_id`` is belt-and-
-    suspenders alongside the occurrence table's own
+    ``channel``-specific behavior:
+      - ``whatsapp``: unchanged — ``message_subject``/``message_body``
+        are left ``NULL``; the message is still composed client-side at
+        tap time (§20.3), and the full
+        pending_approval → approved → report-opened → completed/
+        link_failed state machine applies.
+      - ``email``: ``message_subject``/``message_body`` are populated at
+        creation time from ``services/message_templates.py`` and are the
+        user's editable draft (``PATCH /mobile/approvals/{id}``) up
+        until they approve. There's no "did the link open" step to
+        report for email — the backend can directly confirm an SMTP
+        send succeeded or failed, so ``approve`` for this channel goes
+        straight to ``completed``/``link_failed`` (see
+        ``services/approvals.py``), skipping ``report_opened``
+        entirely. This table is also how a successful *auto*-send
+        (``User.auto_send_email=True``, close enough to the birthday —
+        see the scheduler) is recorded: created already in the
+        ``completed``/``link_failed`` state, actor ``system``, so both
+        send paths share one place to look for "was this contact's
+        birthday message actually sent."
+
+    The unique constraint on ``(reminder_occurrence_id, channel)`` is
+    belt-and-suspenders alongside the occurrence table's own
     ``(reminder_id, occurrence_year)`` uniqueness (§17.3) — even if the
     scheduler somehow re-evaluated the same occurrence, it couldn't
-    create a second approval row for it.
+    create a second approval row for the same channel. Widened from a
+    plain unique-on-``reminder_occurrence_id`` now that a single
+    occurrence can have both a whatsapp and an email approval.
 
     Not soft-deleted (§14's convention for this table): an approval is
     either actioned, expired, or dismissed — there's no "undo" concept
@@ -655,12 +690,16 @@ class PendingApproval(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    message_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message_body: Mapped[str | None] = mapped_column(Text(), nullable=True)
 
     contact: Mapped["Contact"] = relationship("Contact")
 
     __table_args__ = (
         UniqueConstraint(
-            "reminder_occurrence_id", name="uq_pending_approval_occurrence"
+            "reminder_occurrence_id",
+            "channel",
+            name="uq_pending_approval_occurrence_channel",
         ),
         Index("idx_pending_approvals_user_id", "user_id"),
     )
