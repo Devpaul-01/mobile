@@ -60,13 +60,14 @@ class UserProfile(BaseModel):
     email_verified: bool = False
     name: str | None = None
     timezone: str | None = None
+    auto_send_email: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class UserProfileUpdate(BaseModel):
-    """Payload for PATCH /mobile/auth/me. Both fields optional/independent —
-    sending only one leaves the other unchanged (see the router).
+    """Payload for PATCH /mobile/auth/me. All fields optional/independent —
+    sending only one leaves the others unchanged (see the router).
 
     ``timezone`` must be a real IANA zone name (e.g. "America/New_York"),
     not just any string under 100 chars — the scheduler does
@@ -76,10 +77,17 @@ class UserProfileUpdate(BaseModel):
     user being evaluated in that run, not just this one. Validating at
     write time, where a client can see and correct the error, is far
     better than discovering it later inside a background job with no
-    caller to report it to."""
+    caller to report it to.
+
+    ``auto_send_email``: opt-in toggle (default False) for automatically
+    sending a reminder's birthday-message email once the scheduler
+    considers it close enough to the contact's actual birthday, rather
+    than always waiting for the user to approve it from the queue — see
+    services/scheduler.py's "Birthday-day email" docstring section."""
 
     name: Optional[str] = Field(None, max_length=255)
     timezone: Optional[str] = Field(None, max_length=100)
+    auto_send_email: Optional[bool] = None
 
     _sanitize_name = field_validator("name", mode="after")(sanitize_text)
 

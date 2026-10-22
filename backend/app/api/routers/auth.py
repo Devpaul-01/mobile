@@ -431,14 +431,17 @@ async def update_me(
     current_user: User = Depends(get_current_user_allow_unverified),
     db: AsyncSession = Depends(get_db),
 ) -> UserProfile:
-    """Partial update of the current user's name and/or timezone — a field
-    left out of the payload is left unchanged. See UserProfileUpdate for
-    why ``timezone`` is validated as a real IANA zone name."""
+    """Partial update of the current user's name, timezone, and/or
+    auto_send_email — a field left out of the payload is left unchanged.
+    See UserProfileUpdate for why ``timezone`` is validated as a real
+    IANA zone name, and what ``auto_send_email`` controls."""
     fields = data.model_dump(exclude_unset=True)
     if "name" in fields:
         current_user.name = fields["name"]
     if "timezone" in fields:
         current_user.timezone = fields["timezone"]
+    if "auto_send_email" in fields:
+        current_user.auto_send_email = fields["auto_send_email"]
     await db.commit()
     await db.refresh(current_user)
     return UserProfile.model_validate(current_user)

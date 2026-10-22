@@ -329,9 +329,10 @@ paths:
       tags:
       - mobile-auth
       summary: Update Me
-      description: "Partial update of the current user's name and/or timezone \u2014\
-        \ a field\nleft out of the payload is left unchanged. See UserProfileUpdate\
-        \ for\nwhy ``timezone`` is validated as a real IANA zone name."
+      description: "Partial update of the current user's name, timezone, and/or\n\
+        auto_send_email \u2014 a field left out of the payload is left unchanged.\n\
+        See UserProfileUpdate for why ``timezone`` is validated as a real\nIANA zone\
+        \ name, and what ``auto_send_email`` controls."
       operationId: update_me_mobile_auth_me_patch
       requestBody:
         content:
@@ -1424,6 +1425,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
           description: Internal Server Error
+  /mobile/approvals/{approval_id}:
+    patch:
+      tags:
+      - mobile-approvals
+      summary: Update Approval Message
+      operationId: update_approval_message_mobile_approvals__approval_id__patch
+      security:
+      - OAuth2PasswordBearer: []
+      parameters:
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalMessageUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalOut'
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unauthorized
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Not Found
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Conflict
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Unprocessable Content
+        '500':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Internal Server Error
   /mobile/approvals/{approval_id}/approve:
     post:
       tags:
@@ -2049,13 +2109,13 @@ components:
       type: string
       enum:
       - whatsapp
+      - email
       title: ApprovalChannel
-      description: "Only ``whatsapp`` exists today \u2014 this is a separate enum\
-        \ (rather\nthan reusing ``ReminderChannel``) because a ``PendingApproval``\
-        \ only\never exists *for* the whatsapp channel (\xA717); push/email never\
-        \ create\none. Kept as its own enum rather than a hardcoded string so a second\n\
-        approval-gated channel, if one is ever added, doesn't need a schema\nmigration\
-        \ just to widen a string column's implied meaning."
+      description: "A second approval-gated channel, exactly as this docstring once\n\
+        anticipated: ``email`` now also creates a ``PendingApproval`` when a\nreminder's\
+        \ email isn't eligible for (or isn't configured for)\nauto-send \u2014 see\
+        \ ``User.auto_send_email`` and\n``services/scheduler.py``'s birthday-day email\
+        \ check."
     ApprovalListResponse:
       properties:
         items:
@@ -2079,6 +2139,25 @@ components:
       - limit
       - offset
       title: ApprovalListResponse
+    ApprovalMessageUpdate:
+      properties:
+        message_subject:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+          title: Message Subject
+        message_body:
+          anyOf:
+          - type: string
+            maxLength: 10000
+          - type: 'null'
+          title: Message Body
+      type: object
+      title: ApprovalMessageUpdate
+      description: "PATCH /mobile/approvals/{id} \u2014 edit the composed draft before\n\
+        sending. Email channel only (see services/approvals.py\nupdate_message); both\
+        \ fields optional/independent, a field left out\nof the payload is left unchanged."
     ApprovalOut:
       properties:
         id:
@@ -2097,6 +2176,16 @@ components:
           $ref: '#/components/schemas/ApprovalChannel'
         state:
           $ref: '#/components/schemas/ApprovalState'
+        message_subject:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message Subject
+        message_body:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message Body
         created_at:
           type: string
           format: date-time
@@ -2981,6 +3070,10 @@ components:
           - type: string
           - type: 'null'
           title: Timezone
+        auto_send_email:
+          type: boolean
+          title: Auto Send Email
+          default: false
       type: object
       required:
       - id
@@ -3003,18 +3096,28 @@ components:
             maxLength: 100
           - type: 'null'
           title: Timezone
+        auto_send_email:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Auto Send Email
       type: object
       title: UserProfileUpdate
-      description: "Payload for PATCH /mobile/auth/me. Both fields optional/independent\
-        \ \u2014\nsending only one leaves the other unchanged (see the router).\n\n\
-        ``timezone`` must be a real IANA zone name (e.g. \"America/New_York\"),\n\
+      description: "Payload for PATCH /mobile/auth/me. All fields optional/independent\
+        \ \u2014\nsending only one leaves the others unchanged (see the router).\n\
+        \n``timezone`` must be a real IANA zone name (e.g. \"America/New_York\"),\n\
         not just any string under 100 chars \u2014 the scheduler does\n``ZoneInfo(user.timezone)``\
         \ for every reminder on every pass\n(services/scheduler.py \xA716.2) with\
         \ no try/except around that call, so\nan invalid value saved here would crash\
         \ the scheduler pass for every\nuser being evaluated in that run, not just\
         \ this one. Validating at\nwrite time, where a client can see and correct\
         \ the error, is far\nbetter than discovering it later inside a background\
-        \ job with no\ncaller to report it to."
+        \ job with no\ncaller to report it to.\n\n``auto_send_email``: opt-in toggle\
+        \ (default False) for automatically\nsending a reminder's birthday-message\
+        \ email once the scheduler\nconsiders it close enough to the contact's actual\
+        \ birthday, rather\nthan always waiting for the user to approve it from the\
+        \ queue \u2014 see\nservices/scheduler.py's \"Birthday-day email\" docstring\
+        \ section."
     ValidationError:
       properties:
         loc:

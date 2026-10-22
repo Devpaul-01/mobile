@@ -209,6 +209,50 @@ async def test_update_me_sets_name_and_timezone(async_client: AsyncClient, db_se
     assert user.timezone == "America/New_York"
 
 
+async def test_update_me_defaults_auto_send_email_to_false(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    await _register_and_verify(async_client, db_session, "autosenddefault@example.com", "TestPass123!")
+    login_resp = await async_client.post(
+        "/mobile/auth/login",
+        json={"email": "autosenddefault@example.com", "password": "TestPass123!"},
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    resp = await async_client.get("/mobile/auth/me", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["auto_send_email"] is False
+
+
+async def test_update_me_can_toggle_auto_send_email(
+    async_client: AsyncClient, db_session: AsyncSession
+):
+    await _register_and_verify(async_client, db_session, "autosendtoggle@example.com", "TestPass123!")
+    login_resp = await async_client.post(
+        "/mobile/auth/login",
+        json={"email": "autosendtoggle@example.com", "password": "TestPass123!"},
+    )
+    headers = {"Authorization": f"Bearer {login_resp.json()['access_token']}"}
+
+    resp = await async_client.patch(
+        "/mobile/auth/me", json={"auto_send_email": True}, headers=headers
+    )
+    assert resp.status_code == 200
+    assert resp.json()["auto_send_email"] is True
+
+    result = await db_session.execute(
+        select(User).where(User.email == "autosendtoggle@example.com")
+    )
+    user = result.scalar_one()
+    assert user.auto_send_email is True
+
+    # Toggling it back off works too, and a partial update (name only)
+    # must not silently flip it back.
+    await async_client.patch("/mobile/auth/me", json={"name": "Jordan"}, headers=headers)
+    resp2 = await async_client.get("/mobile/auth/me", headers=headers)
+    assert resp2.json()["auto_send_email"] is True  # untouched by the name-only update
+
+
 async def test_update_me_partial_update_leaves_other_field_unchanged(
     async_client: AsyncClient, db_session: AsyncSession
 ):
